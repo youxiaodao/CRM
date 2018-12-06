@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+</head>
+<body>
+    <h1>登陆页面</h1>
+    <form action="/login/" method="post">
+        {% csrf_token %}
+        <input type="text" placeholder="请输入用户名" name="username">
+        <input type="password" placeholder="请输入密码" name="pwd">
+        <input type="submit" value="登陆"><span style="color: red">{{ response.msg }}</span>
+    </form>
+</body>
+</html>

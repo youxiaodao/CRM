@@ -1,0 +1,294 @@
+CRM需求:通过Django快速搭建可以实现数据库多表的增删改查系统
+原模型:Django的admin
+零、知识储备：
+    1、单例模式
+        注册类
+    2、路由系统
+        注册类中动态生成URL
+    3、启动文件（Django启动前的操作）
+        模块autodiscover_modules
+    4、面相对象
+        面相对象也是数据类型，可以作为字典的KEY
+        继承
+        封装
+        静态字段--还有点模糊
+        对象方法的查找
+        使用钩子函数，自定义配置和扩展
+    5、装饰器
+        wraps
+    6、反射
+        根据前端返回的字符串，获取批量操作方法
+        根据field名，在当前行获取打印choice的人类可读的方法
+
+    7、get_%s_display
+        https://docs.djangoproject.com/en/2.1/ref/models/fields/#field-choices
+        For each model field that has choices set, 
+        Django will add a method to retrieve the human-readable name for the field’s current value. 
+        See get_FOO_display() in the database API documentation.
+        model field只要有choices信息的，
+        django都会默认提供一个人类可读的方法,通常以get_field_display()
+    8、判断是函数还是方法
+        from types import MethodType,FunctionType
+            isinstance(arg,MethodType)
+        两者区别在于，有没有实例化，实例化后调用的是方法
+    9、Q对象
+        con = Q()
+        con.connector = 'OR'
+        然后拼接字段组成条件
+        con.children.append(('%s__contains' % field, search_condition))
+    10、分页
+        
+    11、templatetags
+        用于显示数据列表
+    12、生成器
+        防止数据量过大，撑爆内存，导致死机
+    13、QueryDict对象
+        Querydict是一个字典格式
+        request.GET._mutable=ture才后就可以，修改这个字典
+        因为是链接相关的东西，不可轻易修改，所以 深拷贝，然后再修改
+
+    14、urlencode
+    15、反向解析
+    16、mark_safe
+    17、ModelForm
+    18、表模型
+        # 获取APP名
+        app_label = self.model_class._meta.app_label
+        # 获取数据类名小写
+        model_name = self.model_class._meta.model_name
+        获取该字段对象
+        modoel._meta.get_field(字段名)
+        # 获取外键关联的表模型
+        _field.remote_field.model.objects.filter(**self.condition), self, query_dict)
+    19、获取函数名__name__
+    20、__str__
+    21、__iter__将一个类变成可迭代对象
+    22、元类创建类type(name,(object),{})
+    23、isinstance(_field,ForeignKey)
+    24、O2O继承了Forignkey
+    25、M2M的重复，distinct（）（在组合搜索中使用了）
+        Djano的连表是inner join 还是left join
+        queryset永远都是inner join
+        加了一个values或者value_list获取某个指定的字段，就是用的left join 
+            如果不想取空的，就再加一个条件get_notNone
+        -也可以在自己APP的配置中，定制，各字段的去重配置，如DistinctNameOption类(customer表)
+    26、DDD领域驱动模型 和 设计模式
+            一定是对象和对象的关系，要建立对象
+            不允许有字典
+        佩奇让记住两点
+            1、封装不只有字典，列表，还有类
+            2、循环的时候，可以使用类+__iter__
+            3、
+    27、popup
+    28、类的继承和约束
+    29、model继承
+        class Meta：
+            abstract = True
+    30、
+        班主任和任课教师的限制，在model中加入
+            limit_choices_to={'depart__title':'教质部'}或者
+            limit_choices_to={'depart_id__in':[6,7]}
+    31、related_name用于反向查找
+        相当于我们使用related代替了在通过一个对象查询出多个对象集合时，使用表名_set来获取
+    32、闭包
+        外层函数包裹内层函数，内层函数可以调用外层函数的变量，形成一个独立的私密空间。
+            只要在在需要的时候，我们启动这个闭包，去获取这个私密空间内的结果
+    33、Form-ModelForm-formset-ModelFormset
+                -Form的作用
+                    对用户提交的一组表单数据进行校验
+                -ModelForm的作用
+                    对用户提交的一组表单数据进行校验
+                    快速实现增加和修改
+                -FormSet
+                    -对用户提交的多组表单数据进行校验
+                -ModelFormset
+                    -对用户提交的多组表单数据进行校验
+                    快速实现增加和修改
+                    -
+    34、利用字符串导入模块
+        from django.utils.module_loading import import_string
+        v=import_string(v)
+    35、关于注册字典类型用字典的原因
+
+    36、事务
+    37、数据库引擎
+    38、bulk_create,将一个对象列表插入数据库，提高插入的效率
+
+    39、Linux逃不掉
+    40、开发组件--->源码（Flask+Djano）---->架构（设计模式+领域驱动+Linux硬件）
+
+权限相关
+    1、session保存权限信息和菜单信息
+    2、inclusion_tag处理动态菜单
+    3、中间件
+    4、白名单
+    5、
+
+
+1、单例模式
+    通过单例模式，可以保证，这个类只用一个实例，且提供类的所有方法
+    我们这里，实现单例模式的方法是
+        生成一个实例，在需要的时候，都调用这一个实例
+2、路由系统
+    -include的本质
+        做路由的拼接
+        源码方法中返回一个元组
+            return (urlconf_module, app_name, namespace)
+            (url分发地址：是一个列表[路由关系]最关键，app名称，namespace)
+    
+    -namespace
+        用于反向解析时
+    
+    -name
+        用于反向解析
+        
+    -视图中反向解析格式
+        reverse(namespace:name)
+        
+
+    
+3、启动文件
+    依赖自动发掘模块
+        from django.utils.module_loading import autodiscover_modules
+        autodiscover_modules('stark')
+    原理过程
+        Django读取自己的配置文件----->找到我们自己设置的的组件APP（增删改查stark）
+        ----->apps.py---->ready方法
+        ----->路由匹配之前去执行每个app里面stark.py文件
+            ----->stark里面添加自己想执行的代码---->
+        路由匹配---->
+
+    1、创建一个stark app组件
+    2、在apps.py中编写ready方法
+      from django.apps import AppConfig
+            class StarkConfig(AppConfig):
+                name = 'stark'
+
+                ## 写在这里，在Django启动之前就运行
+                def ready(self):
+                    # 引入
+                    from django.utils.module_loading import autodiscover_modules
+                    autodiscover_modules('stark')
+        # 在其他APP中添加stark.py，然后添加自己的代码，就会在程序启动前执行
+        程序启动时，会先去每个app中找到stark.py文件并加载
+    3、其他app中中创建stark.py
+    4、程序启动时，便会自动加载stark.py
+    5、最终实现的效果，
+        -**不用改动stark APP中的代码，
+        -只用在业务APP中添加stark.py，然后编写代码逻辑
+
+
+
+一、开始动态的创建URL
+    创建AdminSite类，并生成一个实例site
+        其他业务类APP中调用实例site
+        site中的方法urls 返回一个元组self.get_urls(), self.app_name, self.namespace
+            这就相当于一个include
+            这一步制定所有URL的namespace是'stark'
+                在反向解析的时候需要加上stark：
+        ->get_urls() 方法返回列表
+            列表中是url(r'^%s/%s/%s/' % (app_label, model_name, item.prev), (item.config.urls, None, None))
+                第二个参数又相当于一个include
+                    通过这一步,通过APP名和表名的拼接，给每一个表都指定出各自的URL
+                    
+                item.config.urls返回的是一个列表
+                    包含固定的增删改查四个URL关系
+                        1对应的视图
+                            wraps保留函数名不变
+                        2以表名和APP名组合成的URL别名
+                    urlpatterns = [
+                        url(r'^list/$', self.wrapper(self.changelist_view), name=self.get_url_name('changelist')),
+                        url(r'^add/$', self.wrapper(self.add_view), name=self.get_url_name('add')),
+                        url(r'^(?P<pk>\d+)/change/$', self.wrapper(self.change_view), name=self.get_url_name('change')),
+                        url(r'^(?P<pk>\d+)/del/$', self.wrapper(self.delete_view), name=self.get_url_name('del')),
+                    ]
+二、装饰器wrapper的作用
+    为视图函数执行之前或者之后，预留钩子函数
+    wraps-->为了保证在调用func时，保留函数原信息
+        stark中暂时没有用到wraps，以后flaks会用
+
+三、生成URL之后，就要显示数据列表了
+    可定制排序，和显示哪些列
+        order_by=[]
+        list_display=[]
+        使用了templatetags，显示列表数据
+            使用的知识点：
+                判断是不试试方法
+                反射
+                choice选择显示人类能识别的文本
+                获取字段的verbose_name
+                用生成器向前端输出数据
+
+    添加多选框checkbox，定制批量操作功能
+        display_checkbox 该方法返回字符串标签，字符串标签，作为每一行数据，利用templatetags渲染到前端
+            该行数据的pk值，作为选择框的value值，以供选择之后，发送到后端
+        使用反射获取批量操作方法
+        1、定制批量功能-批量删除
+            display_del 该方法返回字符串标签，字符串标签，作为每一行数据，利用templatetags渲染到前端
+                将反向解析的得到的URL 添加到字符串标签里面
+                    namaspace在site对象实例中
+                    name通过get_url_name方法获取
+                        app_label = self.model_class._meta.app_label
+                        model_name = self.model_class._meta.model_name
+四、数据的添加、编辑和删除
+    1、添加按钮的权限
+        get_add_btn,返回None，就表示没有添加权限
+    2、添加视图
+        ModelForm渲染添加页面
+            可定制自己的ModelForm
+                定制class PubModelForm(forms.ModelForm):
+                        class Meta:
+                            model = models.Customer
+                            # fields=[]
+                            # fields='__all__'
+                            exclude = ['consultant', 'status']
+                    
+                使用class PubliscCustomerConfig(StarkConfig):
+                    赋值model_form_class = PubModelForm
+
+            get_model_form_class方法，为钩子函数留下接口
+                以便根据权限自定义
+                model_form_class默认为None
+    3、编辑视图
+        同理与添加
+        获取数据对象obj，获取ModelForm
+            form=ModelForm(instence=obj)
+            通过校验后
+                form = ModelForm(request.POST, instance=obj)
+    4、定制save功能
+        预留钩子def save
+            ...后面补充
+
+四、组合搜索
+    filter_list
+    Option对象
+    Row对象
+
+五、保留搜索条件的实现
+    反向解析的时候，URL拼接之前的条件
+
+
+进度：
+    20101010 23:32
+    1、看完AdminSite
+    2、准备看装饰器
+    3、装饰器，完成
+    4、templatetags里面的显示数据列表，理清了意思
+    5、准备看360行开始
+    6、准备看466行
+
+    7、完成StarkConfig的注释
+    8、完成Option的注释
+    9、完成封装数据列表显示类的注释
+    9、准备注释Row类
+    10、Row的active的逻辑有点混乱
+    11、理解了，这个在每次刷新请求后，重新定制各个按钮的URL和样式的过过程
+    12、已完成strak组件stark.py的全部注释
+
+    13、准备
+        1、列出所有知识点
+        2、添加未完成代码
+
+    14、参数的传递和什么时候使用类的封装？靠经验？
+
+

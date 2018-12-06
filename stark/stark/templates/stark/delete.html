@@ -1,0 +1,21 @@
+
+{% extends 'stark/layout.html' %}
+
+{% block css %}
+
+{% endblock %}
+
+{% block content %}
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-6 col-md-offset-3">
+                <form method="post">
+                    {% csrf_token %}
+                    <p>是否确定要删除？</p>
+                    <a href="{{ reverse_url_list }}" class="btn btn-default">取消</a>
+                    <button type="submit" class="btn btn-danger">确 认</button>
+                </form>
+            </div>
+        </div>
+    </div>
+{% endblock %}

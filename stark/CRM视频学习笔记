@@ -1,0 +1,1409 @@
+进入M7了-----20180925
+
+rbac权限
+表设计：55-108行
+实现权限控制的思路和代码编写：109-154
+动态菜单：155行
+
+stark组件
+线下视频第一节：233行
+单例模式、路由本质、启动脚本、类的继承、stark动态生成URL
+线下视频第二节：335行
+方法和函数的区别、yield、反射、装饰器、显示数据列表、checkbox、编辑、删除、
+线下视频第三节：482行
+QueryDict、Q对象、批量操作、分页
+线下视频第四节：660行
+可迭代对象、组合搜索、
+线下视频第五节：910行
+popup、类的继承和约束、model的继承、CRM业务-部门管理-用户管理-课程-校区-班级、私户移除客户、权限组件应用
+线下视频第六节：1070行
+choice的文本显示、CRM业务客户管理、公户和私户、添加客户、、、、
+线下视频第七节：1290行
+录入权限、分配权限和权限控制、应用、权限组件使用规则
+线下视频结课分享：1363行
+
+
+
+      
+------------以上是目录-----------第28行
+
+作业题目: CRM实战开发及完善
+
+    作业需求:
+
+    1.开发通用的、可插拔式的增删改查组件，可很容易的嵌入各种django项目
+    2.开发通用的、达到对象级别的权限控制组件，且允许用户自定制权限
+    3.权限组件支持角色管理，根据业务需求分出销售、学员、讲师角色
+    4.允许销售创建、跟进客户信息
+    5.允许学员交作业、查成绩
+    6.允许老师进行班级点名、批作业
+
+01crm介绍
+    CRM
+        1、权限-----> 通用组件开发
+        2、stark组件----->数据库的增删改查---->通用组件的开发
+        3、CRM----->业务
+    以通用组件为基础，再加上不同的业务逻辑
+    达到快速开发一套系统的目的
+
+02权限系统介绍
+    关于权限的思考
+        1、为什么要有权限
+        2、为什么要开发组件
+        3、web里，什么是权限----->URL=权限
+
+03第一版表结构设计
+    1、用户表
+    2、权限表
+    3、用户-权限多对多的关系表
+    这只能是初级阶段的设计
+        理由
+            不便于扩展，比如临时改变和增加权限，或者新人加入
+            而且我们的URL 绝对不止七八个。那么，对表的操作绝对很麻烦
+                同类用户修改权限
+    应该升级为----->给同类角色修改权限，即增加角色表
+
+04第二版表结构设计
+    1、用户表
+    2、权限表
+    3、角色表
+    4、权限-角色 多对多
+    5、用户-角色 多对多
+    基于角色的权限控制RBAC，这也是基础版本，现在的设计还不是最终版，但之后的设计都是在此版本基础上扩增的
+
+05创建表关系
+    1、创建django project，luffy_permission
+    2、两个app
+        -rbac，权限组件
+        -web，销售管理系统
+    3、app：rbac
+        -将权限相关的表写到app的models.py中
+        ...
+    4、app: web
+        -将销售管理系统表写到此app的models.py中
+        -销售管理系统业务相关代码：http://www.cnblogs.com/wupeiqi/articles/9178982.html
+    5、两个app的整合
+        销售管理系统中的URL
+            客户管理
+                客户列表：/customer/list/
+                添加客户：/customer/add/
+                删除客户：/customer/list/(?P<cid>\d+)/
+                修改客户：/customer/edit/(?P<cid>\d+)/
+                批量导入：/customer/import/
+                下载模板：/customer/tpl/
+            账单管理
+                账单列表：/payment/list/
+                添加账单：/payment/add/
+                删除账单：/payment/del/(?P<pid>\d+)/
+                修改账单：/payment/edit/<?P<pid>\d+/
+        5.1
+        录入权限
+        创建用户
+        创建角色
+        用户分配角色
+        角色分配权限
+    这么一来，用户登录时，就可以根据自己的【用户】找到所有的角色，
+    再根据角色找到所有的权限，再将权限信息放入session，
+    以后每次访问时候需要先去session检查是否有权访问。
+
+08快速实现简单的权限控制的实现思路
+    1、登录页面是否有权访问
+    2、post请求，用户登陆校验是否合法
+    3、获取当前用户的所有权限并放入session
+    4、再次向服务器发起请求，后端编写中间件虽用户访问的URL进行权限的判断
+09快速实现简单的权限控制之初始化用户权限
+    构建视图代码，views--account.py----login(request)
+    1、获取当前用户所有的权限，并放入session
+    2、问题一：
+        1一个用户是否可以拥有多个角色
+        2一个角色是否可以拥有多个权限
+        -------->所以要去重
+        问题二：
+            遇到添加的职位，也许会有这种情况，角色的权限为null
+            --------->所以在取数据市，要筛选去除空值
+    3、代码中具体的技巧记录
+        去除没用的数据，只要URL
+        用列表生成式代替for循环
+    4、设置session
+        request.session['xxx']=list
+    5、
+10快速实现简单的权限校验
+    构建中间件用户权限信息校验----web---md---xxx.py----CheckPermission(...)
+    def process_request(self,requsest)
+    1、获取当前用户请求的URL------->requsest.path_info
+    2、获取当前用户在session中保存的权限列表
+    3、权限信息匹配
+        ==----->正则表达式(re.match)------>加入^$,排除非法输入（customer/list/asdjlfllasdjf;lj）的访问
+        匹配到了---flag=True默认返回none
+        没有匹配到---返回'没有权限'
+    4问题：
+        登陆对于每个人都有权限
+        ---->设置白名单----将默认所有人都能访问的URL加入白名单（也可以通过正则：'/admin/.*'）
+        ---->白名单不用通过校验,return None
+
+    至此，已经做了10%
+
+11代码完善，将权限相关的功能放到rbac的应用APP下以便于以后组件的应用。
+    1用户登陆和权限初始化servers
+    2配置文件的应用
+    3Midweares
+    4固定的模板样式(没有权限和无法访问)
+
+12代码完善的补充
+    总结：上面是进行权限控制的代码
+
+13动态菜单功能
+    -一级菜单
+        问题：如何动态动态显示一级菜单？
+            a.表结构修改---添加字段is_menu icon----录入数据
+            b.获取菜单信息并保存到session
+                获取
+                保存
+            c.模板中显示菜单信息(session)
+                最简单的动态菜单
+                    循环
+                    问题1.session的KEY
+                    问题2.active
+                    问题3.逻辑，使用的更便捷
+                inclusion_tag
+                    创建目录
+                    Library
+                        没有找到这个inclusion_tag，因为没有重启
+                扩展：
+                    解决active问题
+    -二级菜单
+14二级菜单实现思路
+    结构
+        1：{title：
+            icon：
+            chidren：[]
+            }
+        2：{
+
+            }
+    数据库是否支持我们这样的结构
+        添加父子关系
+            一级不用URL
+        修改数据库
+            菜单表
+    a.session中存储的菜单信息结构，如上
+    b.数据库表结构
+        添加menu表
+        权限表增加外键menu
+    c.页面显示二级菜单
+        inclusion_tag中循环显示
+15动态显示二级菜单代码编写
+    流程
+        修改数据库
+        初始化取出菜单
+        修改inclusion_tag
+        修改样式
+    但是
+        字典是无序的
+            有序
+        哪个菜单是被访问的
+            显示出来
+            其他项目影藏
+
+16动态菜单之非菜单默认选中
+    点击编辑和添加时，菜单没有被选中项
+    点击某个不是菜单的选项时，指定一个菜单的权限，让其成为默认选中以及展开
+        a.设计数据库---自关联
+        b.思路
+            -登陆，做权限和菜单的初始化
+                -获取菜单信息
+                    修改数据结构
+                -获取权限信息
+                    修改数据结构
+            -再次来访问
+                -中间件进行权限的校验
+                获取id和pid
+            -模板中使用inclusion_tag生成动态菜单
+                
+17动态菜单之路径导航
+    思路
+        设计路径列表字典，
+        取出当前菜单的名称，有pid的取出父级路径名称
+        如果有pid，添加两层
+        没有，就是一层
+    设计inclusion_tag
+    让最后一个变成灰色，且不可点击
+
+
+线下视频
+01CRM第一节课内容概要
+    1、stark介绍
+        快速完成对N表的怎删改查+自定义复杂操作
+    2、单例模式
+
+    3、路由系统
+        
+    4、制做启动文件
+        路由系统是什么时候开始创建的？---->一启动Django就有了
+        启动之后--加载之前，我们定制一些代码
+
+    5、参考Django的admin的一些源码，编写组件
+
+02内容回顾
+    -面相对象
+        类也是一种数据类型，类可以当做key
+    -django
+        django中的model类所在APP名称、以及小写类名
+            def index(request):
+                _registry={
+                    m1.UserInfo:'1',
+                    m2.Role:'2'
+                }
+            for k,v in _registry.items():
+                print(k._meta.app_label,k._meta.app_name)
+
+03单例模式
+    只创建一个实例
+    我们这么写
+        zhaoshen.py
+            定义一个类
+            创建实例
+    调用，直接引入这个实例
+
+    为什么要用单例模式？
+    单例模式中操作了同一个实例
+04路由系统回顾和补充
+    -include的本质
+        返回了元组
+    -namespace
+        namespace：namespace：name必须一级一级都加上
+    -补充
+        （url分发地址是一个列表[路由关系]最关键，app名称，namespace）
+        动态增加路由
+
+05制作启动脚本
+    原理过程
+        Django读取自己的配置文件----->找到我们的APP（增删改查stark）----->apps.py---->ready方法
+        ----->路由匹配之前去每个app里面stark.py文件----->添加自己的代码---->路由匹配---->
+    1、创建一个stark app组件
+    2、在apps.py中编写ready方法
+      from django.apps import AppConfig
+            class StarkConfig(AppConfig):
+                name = 'stark'
+
+                # 写在这里，在Django启动之前就运行
+                def ready(self):
+                    # 引入
+                    from django.utils.module_loading import autodiscover_modules
+                    autodiscover_modules('stark')
+        # 在其他APP中添加stark.py，然后添加自己的代码，就会在程序启动前执行
+        程序启动时，会先去每个app中找到stark.py文件并加载
+    3、其他app中中创建stark.py
+    4、程序启动时，便会自动加载stark.py
+        -最终实现的目的，
+        -**不用改动stark APP中的代码，
+        -只用在业务APP中添加stark.py，然后填加代码逻辑
+
+06stark组件之注册类，继承类复习
+    通过代码，可以得到字典，字典中是键值对
+    键就是我们要祖册的类名，值是类的实例对象
+
+07接着上面，插着讲了一个继承类的练习
+    
+08继续讲解继承类中，复习类方法的查找顺序
+    
+09stark组件之动态生成URL
+    include
+    单例模式
+        注册类实例
+            注册模型类
+        封装模型增删改查方法的类
+    启动脚本
+    扩展URL
+    
+
+    ----->自动生成URL
+
+10URL钩子函数
+    给role增加一个URL
+        我们之前预留了一份钩子extra
+        在app01中的类，也就是业务类中的stark.py中，定义自己的extra
+11  自定义处理函数
+        在app01中的类，也就是业务类中的stark.py中，定义自己的change_list
+
+    --搞清楚：
+        动态让咱的程序生成URL
+        封装的值是谁
+        传值的时候，它是那个类的方法生效
+12Django源码流程一瞥
+    
+第二节
+1、主要内容
+    今日内容：stark统一增删改查 curd
+        
+        1. 方法和函数的区别？
+        
+        2. yield 
+        
+        3. 反射
+        
+        4. 开始怎删改查的开发
+        
+        5. 保留原搜索条件
+2、内容回顾
+    单例模式
+    这是谁
+    路由分发
+    找到表所在APP名，类名小写
+    钩子函数，自定义处理函数
+
+3前戏--方法和函数的区别
+    错误的认识：方法里面有一个self参数
+    跟调用它，用什么方式调用有关系
+        直接调用，没有实例化（函数或者类中的函数）----函数
+        通过实例化对象调用----方法
+        通过对象调用会自动传入self，直接调用则不会
+        即函数不会自动传入值
+    3.1判断是函数还是方法
+        from types import MethodType,FunctionType
+            isinstance(arg,MethodType)
+4前戏--面相对象练习题
+    函数和方法的区别的练习
+    静态字段
+        
+    避免静态字段造成的影响，定义自己的列表，然后扩展
+
+5前戏--yield生成器的应用
+    防止数据量过大，撑爆内存，导致死机
+
+6前戏--反射的应用
+    自定义页面显示列
+    1、通过getattr（）获取表中对应字段的数据
+        getattr(item,name)) 打印一列
+    2、获取字符的verbose_name
+        models.UserInfo._meta.get_field(name).verbose_name
+7前戏--装饰器的应用
+    在装饰器下保留函数原信息，比如函数名
+        import functools
+            @functools.waps(func)
+
+8stark组件：排序及获取列表数据
+    提出需求：
+        取角色按ID从大到小排序
+        取用户按ID从小到大排序
+        ----->即自定义，使用钩子函数来自定义
+        order_by（‘id’，‘-name’，...)
+        插讲知识点，类和对象找方法
+        ---->因为不确定表是否有ID，默认的写为空
+
+    模板页面
+        用之前权限做好的
+        优化目录，给stark下的static和 templates 加上一级stark文件夹，
+            防止，最外层干的覆盖
+        for循环，取数据，显示数据
+    定制表的显示
+        1获取数据
+        2定制显示
+        3如果自己的APP没有定制，那么list_display为空，又该如何显示呢
+            方案1：直接显示表名
+    预留的钩子使用来自定制（扩展）
+        根据权限显示显示不同的数据
+
+09中间交流
+    批评线下同学
+
+10定制其他功能--checkbox、编辑和删除
+    目标：代码的可读性
+            页面的设计
+        其他的很多功能
+    定制checkbox
+        把定制函数display_checkbox加入display_list
+        表头和数据显示时
+            分开判断是字段还是函数（在stark组件中）
+                是表头还是数据（业务在app中判断，以返回不同干的值
+                                在stark组件中，传入标志isHeader的值和对象row），
+                                以区别显示不同的定制内容
+            数据中，使用mark_safe,使得字符串标签能在页面上显示
+            为字符串标签传入对象的pk，
+                -之后才能通过form表单，获得选择的是那个数据
+    定制编辑和删除
+        把定制函数display_checkbox 移到 stark组件的 StarkConfig中，以便调用
+        和checkbox 一样，只是改变一下标签
+
+        反向解析URL
+            之前自动生成的URL中有name
+                -name--->APP名_model表名_操作
+            site对象中有namespace
+            拼接出name
+            利用reverse,反向解析出URL
+            还需要给URL传入PK的值reverse（name，kwargs={‘pk’：}）
+        优化代码
+            反向解析的URL的代码，写到一个函数方法中
+
+11作业一：
+    拆分表格数据处理和展示函数
+    利用两个知识点
+        inclusion_tag
+        生成器
+12stark组件--添加功能
+    默认都显示添加按钮，且地址都是不一样的
+        在app中可以设置钩子函数，根据权限，返回Flase,则不显示添加按钮
+    添加数据视图
+        forms.modelform--->定义了forms组件，渲染页面
+            新知识的用法
+                需要学习一下
+            比form组件好用
+        定义get_model_form_class方法，为钩子函数留下接口
+            以便根据权限自定义
+            空列表model_form_class
+        
+13stark组件--编辑功能
+    
+14stark组件--删除功能
+
+15目前组件扩展点整理
+    都能自定制什么呢
+        1、order_by排序规则
+            1--直接加到order_by 列表中
+            2--钩子函数中return order_by 列表
+        2、显示列
+            1--直接写到display_list 列表中
+            2--钩子函数中 return display_list 列表
+        3、add 添加按钮
+            钩子函数直接 return None、False 或者直接pass
+        4、定制ModelForm
+            1、直接写类，然后放到自定义类中
+            2、在自定义类中写钩子函数
+
+    原生扩展点
+        5、自定义列表显示页面
+        6、增加URL
+        7、自定制URL
+            重写get_url,只留下需要的url
+            
+16作业二
+    加分页功能
+
+第三节内容概要
+    1、批量操作
+        下拉框
+    2、搜索框
+        可配置搜索选项
+    3、保留原搜索条件
+
+    4、分页
+
+01内容回顾和补充
+    1、静态字段和字段
+        静态属性---类变量---静态字段
+        对象属性---实例变量---字段
+        方法
+        @staticmethod，静态方法
+        @classmethod，类方法
+
+        @propety，属性
+    2、函数
+        获取函数的名字，可通过 函数.__name__
+    3、info={'k1':v1,'k2':v2}
+        v=info.urlencode()
+    4、django中的request.GET是什么类型
+        Querydict是一个字典格式
+        request.GET._mutable=ture之后就可以，修改这个字典
+        因为是链接相关的东西，不可轻易修改，所以 深拷贝，然后再修改
+        
+        添加列表
+            .setlist('k4',[10,12])
+        获取列表
+            .getlist('k2')
+            append是不生效的，要先获取，在添加
+
+02 -5内容补充之QueryDict对象，和Q对象
+    保留原来的搜索条件
+        获取到请求条件---urlencode---变成键值对-QueryDict对象----urlencode 
+        ---包装在Url里面（？%s）-做重定向---新视图也会接收到---制作返回地址
+    
+    -6模糊搜索--name包含大 或 email包含大
+       用 Q对象q=Q（）
+        q.connecter="or"
+        用childen链接
+        q.childen.append(('name__contains','大'))
+        q.childen.append(('email__contains','大'))
+
+
+03 批量操作
+    1、应该是可配置的，可扩展的action_list，默认是没有的
+        表单提交，数据包括的内容有什么
+    2、批量操作的功能配置列表
+        action_list=[]
+        还有与之对应的函数方法
+    3、处理表格函数中
+        获取列表，
+        该怎么加入功能呢？
+    4、定义对应功能的函数
+        func .text、
+            获取到text用于前端显示功能名称
+        func.__name__
+            前端用于作为下拉框option的value值，发送到后端
+            -用反射对应到相应的功能处理函数
+    5、模板设置下拉框
+    6、下拉框设置name='action'，post请求发送到后端
+        取出action对应 的字符串，反射到对应的函数        
+    7、防止非法请求
+        
+    8、功能完成后的返回值
+        可以在功能函数中返回
+        处理表格函数中，反射语句得到返回之后，
+         继续返回这个-返回值-就可以实现功能函数中的返回效果
+
+    9、批量删除函数操作
+        获取到request中选中的pk值列表
+
+    10、默认action_list是空的，
+        模板中设置，如果列表action_list 为空，则不显示标签
+        可以用钩子函数在APP中定义，然后添加
+
+04关键字搜索
+    1、定制搜索范围，也是一个列表，即搜索那一列
+        seach__list
+    2、表格处理函数中，构造数据查询的条件
+        1-获取搜索范围，获取搜索关键字
+        2-Q对象的使用
+        3-filter中也可以添加**字典、Q对象
+        4-模板设置，name，按钮，搜索框、form表单
+        5-搜索范围中也可以添加连表字段
+    3、保留上一次搜索条件
+        获取q的时候，设置默认值
+        在模板中用q的值设置Value
+    4、没有搜索范围的时候，就应该影藏搜索框
+    5、拆分成一个函数
+        这段代码的本质就是返回搜索条件
+    6、跳转走的--保留搜索条件
+        保存默认值的意义
+        保留原搜索条件
+        在由搜索条件的情况下
+            包装到反向解析的路由中
+            --->reverse_url?search_condition
+        没有，就不包装
+    7、利用装饰器，传递request
+        1、利用反向解析函数包装搜索条件需要从request请求中提取搜索条件
+            那么如何，将request传递到反向解析函数中呢
+            很多地方都会用到反向解析和request
+        2、URL一开始的传递是这样的
+            一请求，就有request----处理表格函数---name_or_func反射函数-----反向解析函数
+        3、现在
+            之前在定义get_urls函数中已经给每个请求添加了装饰器
+
+            初始化__init__中，添加self.request=None
+            装饰器中，一有请求，就给request传值
+        
+
+05分页
+    需要考虑保留之前的搜索条件
+    
+    判断页码是数字并且小于1
+
+
+    从数据库取到数据，传递到后端
+
+    URL包装搜索条件，还要包装页码
+    
+    遇到坑：'int' object has no attribute 'encode'
+        明明是QueryDict对象，却出现这样的提示。看源码后
+        将数字转换成字符串，
+        然后就没有报错了！！！
+
+06代码拆分
+    为处理表格函数传参数的类
+        本身的业务不动
+        action_list
+        add_btn
+        queryset
+    inclusion_tag，拆分出表格处理的表头和表数据
+        打包search_list, search_condition, con进传参数的类
+    
+    yield
+        
+    分页打包到传参数类
+        
+    后边还应该设置没有分页的隐藏
+        
+07第三节总结
+    1、批量操作Action（扩展）
+        -反射
+        -__name__ --模板语言不能加__
+        -一切皆对象--func.text=''
+
+    2、搜索（扩展）
+        -Q对象
+        -__contains
+    3、保留原搜索条件
+        -QueryDict
+            -urlencode
+            -_mutable=True
+            -深拷贝
+            -urllib .parse.urlencode
+    4、分页
+        -分页组件
+        -保留原搜索条件
+    5、拆分
+        -ChangeList类的封装
+        -inclusion_tag
+        -生成器
+
+    6、继承
+    7、批量操作和搜索，是可扩展的
+08作业-通读源码
+    1通读源码
+    2使用
+        -单表
+        -FK
+        -M2M
+        -O2O
+        -chioce
+    可以达到的效果。效果，3分钟完成图书管理
+
+第四节
+01第四节内容概要
+    stark组件-组合搜索
+        1、可迭代对象？
+        2、面相对象的封装
+        3、获取FK/M2M/O2O对应的表中所有的数据
+        4、组合搜索
+02内容回顾
+    1、三个类
+    ChangeList
+        由于在每个列表页面，视图函数没用到的变量太多了
+        为了方便应用，
+        封装列表页面需要的所有数据
+
+    StarkConfig
+        URL 和 视图 的对应关系
+        默认的配置
+            action_list
+            ...
+
+    AdminSite
+        单例模式
+        用于保存 数据库类 和处理该类的对象 的对应关系
+        _registy={
+
+        }
+        
+    2、知识点
+        inclusion_tag
+        urlencode
+        _meta.model_name 
+        _meta.app_label
+        深浅拷贝
+        Querydict 对象默认不可修改 _mutable=True
+        生成器 构造数据
+
+        路由分发
+            -include
+            -元组（[],None,None）
+
+        辨别函数和方法的区别
+
+        Q对象，构造浮渣的查询条件
+
+            -作用，or条件
+            -其他
+                多个Q对象可以联合使用，使用不同的关系关键词，OR 或者 AND或者NOT
+        反射
+            list_diaplay
+            action
+        继承
+            自定制config
+            注意，，self到底是谁
+        反向生成URL
+            reverse（xxx）
+            namespace：xxx
+        分页（保留原搜索条件）
+            
+        ModelForm
+        
+        functools.wraps,
+            -用于保留原函数的原信息（函数名/函数注释）
+            -偏函数，partial，相当于加了一个默认参数
+
+        钩子函数
+            预留可扩展位置
+
+        request.GET
+            .get
+            []
+            getlist
+            setlist
+            ._mutable =True
+        mark_safe
+            没有，就是默认以字符串共计
+            xss攻击，
+        单例模式
+            什么时候用单例，一堆数据，或者一个数据，是可以公用的，
+            多例模式
+                一个类，实例化，各自有独立的空间，互不影响，可定制特殊的属性，
+            
+        获取函数名__name__
+
+        autodiscover_model
+
+        装饰器
+
+            @
+            函数包装
+        
+        order_by
+
+        __str__
+
+        ...等等
+
+    补充
+        动态的创建类
+            type（name，（objec，），{'county':中国，'detail':lambda x:x+1}） 元类  
+    
+    着重--QueryDict
+        
+03前戏
+    -可迭代对象
+        class Foo(object):
+            def __iter__:
+                return 
+            yield 11
+            yield 12
+        --生成器（迭代器的一种）
+        --应用
+            普通，循环列表
+            类，iter，yield
+            加入标签
+    -封装
+        --需求--如何判断一个列表中的字段是多选，还是单选
+            1.加后缀。但是可能会有字段是后缀名
+            2.字典格式，添加键值对。这就是分装的思想，的苗头
+            3.类，对象实例化封装
+                优点，加工处理可以封装到方法，代码清晰，
+    -获取关联字段的所有数据
+        modoel._meta.get_field(字段名)
+        obj.rel
+            fk_obj = models.Depart._meta.get_field("user")
+			user_info_queryset = fk_obj.rel.model.objects.all()
+
+04组合搜索基本配置
+    样式
+    可自定义列表，钩子函数
+        问题：如果字段是外键字段，就是外键对应表的所有数据
+                isinstance(_field,ForeignKey)
+                    _field.rel.model.objects.all()
+            ******rel，变成了remote_field
+            如果不是，就是本身的所有数据
+        问题：chioce选项的展示
+            判断有没有chioces字段
+        问题：页面展示都是__str__的内容，或者字符串
+            用类封装
+    配置项类
+        刷选数据
+            
+            列表[字典{}]
+        页面展示
+
+05组合搜索显示
+    达到的效果
+    状态不好，没有理解好
+        
+06组合搜索定制搜索条件
+    总结：
+        Row对象
+            一行所有的数据
+        option类
+            做数据的配置，一行需要用的所有东西，文本显示的东西
+            封装get_queryset
+    BUG：M2M--->部门和项目，要看项目在组合搜索的条件上显示却是部门名称
+        判断M2M 外键
+        O2O 不用判断，继承了Forignkey
+
+07组合搜索文本显示
+    拆分定义get_text
+    就可以去掉---对象.name
+        
+08组合搜索的URL构建
+    获取组合搜索的筛选
+        1得到一个URL ，怎么去筛选出我们需要的条件？
+        2再一次filter
+            循环option，拿取field，作为key，取到url中的条件
+            加工为in条件的字典去数据库取数据
+            问题：不能使用name__in=['1']
+                解决：根据value值取出对象
+                        判断对象是否存在，且不是选择chioce
+
+            排除为空的键值对
+        3给url加上选中的条件
+            引入request
+                在get_queryset中传入request.GET--->传入ROW
+                动态生成的标签
+                    href属性，包装选中的条件的value值
+                        copy--->_mutable--->添加键值对到Querydict
+
+                问题：'int' object has no attribute 'encode'
+                    解决：动态生成的值加上str（）
+
+        4、URL动态的在已选中的基础上生成新的URL，然后以&模式筛选数据
+            给选中项加上样式，以展示选中了哪些
+                获取过去原来的，即上一次的的选中条件
+                判断如果选中项在列表中，就给标签加上active
+
+        5、再次点击去掉条件
+            Queryset的pop方法
+09多选和单选
+    加配置条件
+        option，添加isMulti属性
+        判断
+            多选，
+                如果有自己的值，列表中移除，然后重新赋值
+                如果不是，添加到
+
+    全部
+        有值，就是选中项，没有值 就是全部
+        移除掉自己的那一项，就是全部了，不会影响其他行
+        移除后需要重新赋值
+10代码拆分
+    去重
+        M2M的重复，distinct（）
+        ---->inner join 和 left join
+
+    拆分，将获取条件的函数独立出去
+        ...
+
+        自定制组合搜索条件显示字段的去重
+            DistinctNameOption类，继承Option
+            写在自定制中stark中
+
+
+11组合搜索梳理和扩展
+    各方面的的综合使用
+    难度在于，逻辑设计
+        面相对象设计
+        DDD，领域驱动模型
+            建模，类和类之间的关系
+            
+            要用对象的封装
+            循环
+
+12梳理
+    1、只有一份字段配置 list_filter=[name,tel]
+        内部，判断
+            获取字段对象
+                如果是外键或者选择
+    2、option对象
+        封装字段，封装条件
+    3、引入可迭代Row对象
+        yield 低级
+    4、处理单选
+
+    5、处理多选
+
+    6、数据的搜索
+
+    7、主要适用
+        -FK
+        -Choice
+        -M2M
+        Option参数
+        Option（数据库字段名，是不是Chioce，显示文本的函数，URL中对应值的函数，筛选条件，是否支持多线）
+13第四节作业
+    拆解涉及的知识点
+
+第五节
+01 内容概要
+    1、popup
+    2、model类的继承
+    3、组件的应用，CRM业务的开发
+        -RBAC组件
+        -stark组件
+        -示例：5张表
+
+02内容回顾
+    第一部分：权限相关
+        1、基本流程
+            用户登陆成功之后获取权限信息，将【权限和菜单】信息写入到session中
+            以后用户在来访问，在中间件中进行权限校验
+            为了提升用户体验的友好度，在后台通过inclusion_tag动态生成一个二级菜单
+        2、使用权限
+            -用户登陆：权限和菜单的初始化：init_permission
+            -配置中间件
+            -配置白名单
+            -配置session中使用到的key
+            -load rbac
+                -menu，inclusion_tag 生成菜单
+                -filter，可以在if后做条件，粒度控制到按钮
+
+    第二部分：组件相关
+        1、如何使用？
+            -在App中编写 stark.py
+            -进行定制
+                -默认配置，类
+                -自定义配置，自定制类
+                    list_display 表格式列表上显示的字段
+                    def ...
+                    order_list 排序
+                    action_list 批量操作
+                    search_list  模糊搜索
+                    list_filter 组合搜索
+                    add_btn 是否显示按钮
+                    model_form_class 编辑和添加
+                    def extra_url  扩展
+                    def get_url 自定义URL
+                    def ...
+03popup
+    浏览器自动生成弹窗
+    window.open(url，name，‘...’)
+        如果name重名，就不会重新打开
+
+
+    JS自执行函数
+    popup可以调用把它创造出来的页面里面的函数
+        opener.xxx()
+    Djano模板渲染
+        文件当做字符串，只渲染当前文件中的，
+
+    主页面
+        function xxxx(){}
+        WINDOW.OPEN()
+
+    popup页面
+        opener.xxxx()
+        window.close
+        补充
+            js的自动执行函数
+            用于做作用域的隔离
+                
+04类的继承和约束
+    减少代码，提高复用
+    接口：
+        -网站---API
+        -数据类型---用来做约束，python里面没有，java/c# 里面有
+            JAVA代码+python代码
+            Interface IFoo：
+                def send(self):pass 在接口中的方法不允许写任何代码
+            
+            class Foo(IFoo): FOO 类实现了IFoo的接口，则类中必须编写IFoo接口中所有的方法
+                def send(self)：
+                    print（123）
+            
+            class Xxoo(IFoo): XxOO 类实现了IFoo的接口，则类中必须编写IFoo接口中所有的方法
+                def send(self)：
+                    print（123）
+            
+            def func（IFoo obj）：
+                obj.send()
+
+    抽象：抽象类和抽象方法，用于做约束，提供公共功能
+        java代码
+        python代码
+            abc
+            Python中一种不太巧妙的机制，
+                通过报错。未实现错误，来约束
+05Django的Model继承
+    将狗框架自己写的，不是python的
+        class Meta：
+            abstract = True
+        加上abstract=True，为了让别人继承用，自己类不再生成表结构，只用于为其他类提供字段
+    应用：权限系统
+        
+06rbac权限系统中model继承的应用
+    业务APP继承RABC权限中的user
+07CRM业务开发：部门管理
+    创建项目pro_crm---APP crm---
+    stark组件复制过来
+    写入readme
+    加入模型
+    编写stark.py
+        配置URL，
+        注册模型
+        默认的模板是stark组件的模板
+            业务App新建，自定制模板
+08用户管理
+    需求，显示性别
+    自定制display_gender
+        row.get_gender_display()不能理解
+            已解决
+    查看详细信息页面
+        展示
+        扩展URL
+        显示视图
+        反向解析
+            因为知道表名和名称空间,所以可以写固定,只用传入PK值
+
+09课程/校区/班级管理
+    搜索功能
+        search_list=[name,depart__detail]
+
+    课程注册
+    校区注册
+    文件越来越大,拆分代码,config文件夹
+    班级注册
+        班主任和任课教师的限制，在model中
+            limit_choices_to={'depart__title':'教质部'}或者
+            limit_choices_to={'depart_id__in':[6,7]}
+                也可以加入对象
+
+    定制显示期数,拼接
+    定制时间显示
+    定制组合搜索
+    自定制其他显示
+        比如加一列,一点击图标进入百度
+10stark组件应用梳理
+    -提出作业
+        -做一个每个页面都有编辑和删除
+        -list_display 中chioce 类型 的批量操作,提供简便的显示chioce的公共函数
+            -闭包
+            -反射
+
+11权限组件的应用
+    赋值引入RBAC
+    写入readme
+    多个APP公用一个模板
+        更改之前放继承模板的位置
+    UserInfo表三种方案
+        1、继承
+        2、O2O
+        3、只要一张表
+
+12第五节作业
+    1权限相关的页面有一个有BUG
+    2录入权限信息 和 分配
+        
+
+第六节
+01内容概要
+    1相关知识点
+        -闭包+反射 编写Chioce公共代码
+        -Bug
+    2业务
+        客户管理
+        教学管理
+    3权限的应用
+02内容回顾
+    闭包
+        理解闭包
+            创造一个空间，为了让变量不消失
+            两个人一组结伴编程，相对于两个人一个空间
+            门口有一个提示器，用于开启 开始命令---封闭开发
+            def f1（a1+a2）：
+                ret = a1+a2
+                return ret
+            
+            f1（'寒舍'，'清瑶'） 立即拿到了结果
+            我们理想的是，在有启动命令后，才拿到结果，
+            就像先给a1，a2一个空间，在我们发出开始命令后，才让他们开始行动
+
+            def f1（a1+a2）：
+                def inner():
+                    ret = a1+a2
+                    return ret
+                return inner
+            inner 命令开始的按钮
+
+        存在的意义
+            帮助开发者，维护一个'私密'空间，用于为以后执行提供数据
+
+
+03内容扩展
+    1ModelForm 和 Form 的区别
+        Form  --->formset
+        Model --->modelformset
+    2反射
+        1------>
+            v='xx.xxx.xx.ClassList'
+            module_path,class_name=v.rsplit('.',maxsplit=1)
+            import importlib
+            --根据字符串的形式倒入模块
+            m=importlib.import_module(module_path)
+            --Foo类
+            cls = getattr(m,class_name)
+            --实例化Foo类
+            obj = cls()
+        2------>
+            Django内置模块
+            from django.utils.module_loading import import_string
+            v=import_string(v)
+        3----->
+            牛B之处，开放封闭原则
+            对代码封闭，对配置开放
+                消息提醒-可配置
+                钉钉实例
+            注意：扩展
+            例子：运维开发--采集电脑硬件信息
+                
+04上节作业之chioce
+    闭包+反射
+
+05上节作业之 BUG修复
+    没有完成权限设计，视频还没出完
+
+
+06CRM业务介绍
+    客户管理
+        -公户
+            -推广部
+            -渠道
+        -私户（150+自己找客户）
+            -销售
+        -所有的客户，销售主管查看
+    
+        -跟进记录
+            
+        -缴费+分班
+
+        -
+07crm之客户公户和私户
+    所有客户
+        注册
+        list_display
+        删除和编辑操作，变成公共的，不用每一个都要自己添加
+            在stark中定义get_list_display
+        排序order_by
+        search_list
+        filter_list
+            isChioce
+08CRM之添加客户
+    公户
+        有一个公户的条件，即没有绑定销售人员
+        要用URL加以区分
+            ？p=private 不这样做
+        另一种方案
+            公户和私户添加各自的配置文件
+            所有客户CustomerConfig
+            
+            公户PublicCustomerConfig
+            
+            私户PrivateCustomerConfig
+        然后各自注册
+            registry里面就有了3个键值对
+        字典就不合适了
+            需要自定制
+            将原来的字典换成列表套字典
+                self._registry.append({'model':model_class, 
+                'config':stark_config(model_class, self)
+                'priv':xxx})
+        自定制类封装
+        
+        重写列表view很麻烦
+            应该添加一个方法get_queryset
+        
+        编辑页面到了同一页面
+            URL的别名应该区分，不要重复，重新拼接
+            starkconfig加入prev
+            新建方法，
+                
+09crm之私户添加客户
+    公户，添加时不能有顾问
+        怎么让pub里面的课程顾问去掉？----ModelForm重写
+        报名状态
+            也用modelform排除
+    私户添加客户
+        在save之前加上当前登陆顾问
+        新建save方法
+        instance
+    公户和私户都不能删除，只能移除
+        重写
+
+总结，公户，私户，所有客户的管理已完成
+    URL--->name---->自定制
+
+10批量申请客户
+    公户到私户的申请
+        用批量多选
+            添加多选框---action_list--定制操作
+        
+    并发的问题
+        加锁，原生SQL数据锁
+        开启事务
+            SQL 语句
+        结束事务
+        transaction
+            select_for_update上锁
+        操作失败，根据flag返回已被申请的消息
+    数据量的问题，是不是超过了最大用户数
+        获取自己的客户量+已经选取的人
+        做判断
+
+11公户和私户之间的操作
+    移除客户
+        筛选条件：
+            没有报名的选中的，自己的
+
+12跟进记录
+    思路
+        添加跟进记录
+        display
+            url里面有 id
+
+    看某一条和全部的区别
+    在url中加入cid，判断显示摸个客户的记录
+        在客户表中，我们嫩知道name，stark_crm_changelist
+        所以可以反向解析出url
+
+    所有跟进记录的操作
+13私户跟进记录
+    私户
+        只能看自己的
+            限制条件---客户id和当前顾问是自己
+        添加，修改
+            不需要填写客户名和跟进人，在后台获取，然后通过form添加
+        为什么要 是修改为False才生效？
+
+    公户
+        只能查看
+
+    所有客户的URL没有添加跟进记录的功能
+        
+    
+14缴费申请和分班业务思路分析
+    -缴费记录
+    -财务审核
+    -审核通过后分班
+    
+15上课记录管理
+    教学管理
+        a.，还没做分班，直接操作学生表
+        注册学生表
+    学生记录
+16学习记录
+    创建上课记录
+    点击查看详细
+        ---同userinfo中
+    创建学习记录
+        -加checkbox
+        -action批量初始化，
+            找到班级所有人，
+            为每一个人生成一条学习记录
+            -上课记录的ID--->班级ID---学生
+            -创建记录
+    查看当天的学习记录
+            学习记录显示
+            拿到ID
+            学习记录的
+        -去除添加按钮和url地址
+        
+        -重写url，只要列表功能
+            之前写的都不要了
+            -重写查看视图
+    点名和作业信息的录入
+        -
+
+以上只是整合stark组件和crm业务
+
+01第七节 内容概要
+    今日内容
+        -权限的应用
+            
+    内容回顾
+        1、权限管理
+        2、stark组件
+        3、crm业务
+            -crm系统主要用于做什么
+                客户关系管理，信息管理
+            -主要给谁用
+                销售
+                    -客户分类，销售底薪+业绩，客户的隔离
+                        -所有用户
+                        -公户：申请（锁）
+                                    -行锁，数据库引擎 innodb--->行锁-表锁-事务
+                                    -表锁 Mysiam--->表锁
+                        -私户：150人+自己的客户
+                    -客户跟进
+                    -缴费申请
+
+                推广和渠道
+                    -在公户中录入有效数据
+                教学
+                    -上课
+                    -作业
+                    -成绩
+                教质
+                    -考勤
+                    -问卷
+                学生
+                    -交作业
+                    -查成绩
+                    -查看个人信息
+                    -问卷
+
+            3、技术点
+                -Form的作用
+                    对用户提交的一组表单数据进行校验
+                -ModelForm的作用
+                    对用户提交的一组表单数据进行校验
+                    快速实现增加和修改
+                -FormSet
+                    -对用户提交的多组表单数据进行校验
+                -ModelFormset
+                    -对用户提交的多组表单数据进行校验
+                    快速实现增加和修改
+                    -
+
+*************************************************************************
+因为佩奇讲课用的是Django1.0 在使用Django2.0中会遇到这个问题
+python3 Django 环境下，
+如果你遇到namespace没有注册以及在根目录下urls.py中的include方法的
+第二个参数namespace添加之后就出错的问题。
+请在[app_name]目录下的urls.py中的urlpatterns前面加上app_name='[app_name]'，
+[app_name]代表你的应用的名称。
+可以参考这篇：https://stackoverflow.com/questions/14892462/django-error-upolls-is-not-a-registered-namespace
+******************************************************************************
+第七节
+02录入权限信息
+    跟新的慢，是因为用的for循环
+        换成blue__create就好了
+03分配权限和权限控制
+    分配权限
+        $(':checkbox').prop('checked',true)
+    权限验证+自动生成菜单
+        
+    问题：按钮的控制
+        config中
+            获取url别名name
+            判断有没有在权限中
+
+
+CRM结束
+    难，综合的考验
+    谁组件多，谁做东西快
+    
+    
+    1、crm100%学完--可以和3年Python开发人员较量一番
+    2、学习阶段-稳健版
+        初级阶段：增删改查，每个公司都需要 + Linux
+        
+        初级阶段升级：千万不要报班le --->掌控自己--->每天都要做些什么 +Linux
+            -做项目---->增加熟练度 + 开发组件
+        
+        阶段升级：看源码(Flask+Django)--死磕 + Linux
+
+        阶段升级：架构(Linux硬件+代码(设计模式+领域驱动模型)) + Linux
+
+        千万不要被语言牵绊
+    
+        合伙人搞创业
+
+    3、如何让简历漂亮
+        a.项目+技术点 CRM 复习应该用技术点
+
+        b.热点 区块链和人工智能
+
+        c.自学能力 源码
+
+        b.不一样的经历
+
+    4、设计+讲解能力
+
+    建议：
+        1、上午+下午搞定全天知识点；晚上stark开始+新项目
+        2、时间：
+            -内容回顾
+                -周一~周四：上一天的
+                -周五:全周
+            -晚上：***相互提问***提问，在脑中形成概念
+
+        3、时间控制到小时
+            
+
+
+
+
+
