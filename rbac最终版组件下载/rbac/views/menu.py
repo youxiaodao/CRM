@@ -236,7 +236,7 @@ def multi_permissions(request):
     generate_formset_class = formset_factory(MultiAddPermissionForm, extra=0)
     update_formset_class = formset_factory(MultiEditPermissionForm, extra=0)
 
-    generate_formset = None
+    generate_formset = None  # 为了做错误提示
     update_formset = None
     if request.method == 'POST' and post_type == 'generate':
         # pass # 批量添加
@@ -318,13 +318,14 @@ def multi_permissions(request):
     if not generate_formset:
         generate_name_list = router_name_set - permission_name_set
         generate_formset = generate_formset_class(
+            # 列表生成式
             initial=[row_dict for name, row_dict in all_url_dict.items() if name in generate_name_list])
 
-    # 3.2 计算出应该删除的name
+    # 3.2 计算出应该删除的name，用不上formset
     delete_name_list = permission_name_set - router_name_set
     delete_row_list = [row_dict for name, row_dict in permission_dict.items() if name in delete_name_list]
 
-    # 3.3 计算出应该更新的name
+    # 3.3 计算出应该更新的name，要有一个隐藏的ID
     if not update_formset:
         update_name_list = permission_name_set & router_name_set
         update_formset = update_formset_class(

@@ -1,0 +1,1532 @@
+01crm介绍
+    CRM
+        1、权限-----> 通用组件开发
+        2、stark组件----->数据库的增删改查---->通用组件的开发
+        3、CRM----->业务
+    为什么要做这个
+        每个公司都会用到
+        所有的系统都是增删改查
+    目的:
+        以通用组件为基础，再加上不同的业务逻辑
+        达到快速开发一套系统的目的
+
+02权限系统介绍
+    关于权限的思考
+        1、为什么要有权限
+            保护敏感数据，稀缺数据
+            ...
+        2、为什么要开发组件
+            积累自己的财富，
+        3、web里，什么是权限----->URL=权限 ---->人=>URL
+
+03第一版表结构设计
+    1、用户表
+    2、权限表
+    3、用户-权限多对多的关系表
+    这只能是初级阶段的设计
+        理由
+            不便于扩展，比如临时改变和增加权限，或者新人加入
+            而且我们的URL 绝对不止七八个。那么，对表的操作绝对很麻烦
+                同类用户修改权限
+    应该升级为----->给同类角色修改权限，即增加角色表
+
+04第二版表结构设计
+    1、用户表
+    2、权限表
+    3、角色表
+    4、权限-角色 多对多
+    5、用户-角色 多对多
+    基于角色的权限控制RBAC，这也是基础版本，现在的设计还不是最终版，但之后的设计都是在此版本基础上扩增的
+
+05-06创建表关系
+    1、创建django project，luffy_permission
+    2、两个app
+        -rbac，权限组件
+        -web，销售管理系统
+    3、app：rbac
+        -将权限相关的表写到app的models.py中
+            3张表
+        ...
+    4、app: web
+        -将销售管理系统表写到此app的models.py中
+        -销售管理系统业务相关代码：http://www.cnblogs.com/wupeiqi/articles/9178982.html
+    5、两个app的整合
+        销售管理系统中的URL
+            客户管理
+                客户列表：/customer/list/
+                添加客户：/customer/add/
+                删除客户：/customer/list/(?P<cid>\d+)/
+                修改客户：/customer/edit/(?P<cid>\d+)/
+                批量导入：/customer/import/
+                下载模板：/customer/tpl/
+            账单管理
+                账单列表：/payment/list/
+                添加账单：/payment/add/
+                删除账单：/payment/del/(?P<pid>\d+)/
+                修改账单：/payment/edit/<?P<pid>\d+/
+        5.1
+        录入权限
+            基于django—admin进行权限信息的录入
+                在admin中注册三表
+                创建用户
+                创建角色
+                用户分配角色
+                角色分配权限
+    这么一来，用户登录时，就可以根据自己的【用户】找到所有的角色，
+    再根据角色找到所有的权限，再将权限信息放入session，
+    以后每次访问时候需要先去session检查是否有权访问。
+
+08快速实现简单的权限控制的实现思路
+    Djang请求周期--->
+        1、登录页面是否有权访问
+        2、post请求，用户登陆校验是否合法
+        3、获取当前用户的所有权限并放入session
+        4、再次向服务器发起请求时，后端编写中间件虽用户访问的URL进行权限的判断（是否在session中）
+
+09快速实现简单的权限控制之初始化用户权限
+    构建视图代码，views--account.py----login(request)
+
+    1、获取当前用户所有的权限，并放入session
+        curren_user = models.UserInfo.objects.filter(name=user,password=pwd).first()
+        获取当前用户所有权限(django通过链表查询)
+            role_list = current_user.roles.all().values(permissions__id,permissions__url)
+        但是，这样是会有问题的
+
+    2、问题一:
+        1一个用户是否可以拥有多个角色
+            CEO，总监
+            或者是，总监，销售
+        2一个角色是否可以拥有多个权限
+            CEO
+                /index/
+                /order/
+                /customer/
+            总监
+                /index/
+                /customer/
+            销售
+                /index/
+                /user/
+        -------->所以要去重,使用distinct（）
+            permissions_list = current_user.roles.all().values(permissions__id,permissions__url).distinct()
+        问题二：
+            遇到添加的角色，角色的权限为null
+            --------->所以在取数据市，要价格条件筛选去除空值
+            permissions_list = current_user.roles.fifter(permissions__isnull=False).values(permissions__id,permissions__url).distinct()
+    3、代码中具体的技巧记录
+        上面取出的id是没有用的数据
+        去除没用的数据，只要URL，因为session中无法处理queryset
+        用列表生成式代替for循环
+    4、设置session
+        request.session['xxx']=list
+
+10快速实现简单的权限校验
+    在中间件中对用户的请求进行拦截--对比校验
+    构建中间件用户权限信息校验----web---md---xxx.py----编写类CheckPermission(...)
+                                                               def process_request(self,requsest)
+    1、获取当前用户请求的URL------->request.path_info
+    2、获取当前用户在session中保存的权限列表
+    3、权限信息匹配，要用正则，因为我们的路由由正则
+        ==----->正则表达式(re.match)------>加入^ 和 $,排除非法输入（customer/list/asdjlfllasdjf;lj）的访问
+        设置标志位，当没有匹配上的时候，根据标志位的状态，返回信息
+        匹配到了---flag=True默认返回none
+        没有匹配到---返回'没有权限'
+
+    4、回到08的四个思考问题的第一个问题，：
+        登陆对于每个人都有权限
+        ---->设置白名单----将默认所有人都能访问的URL加入白名单（也可以通过正则：'/admin/.*'）
+        ---->白名单不用通过校验,直接return None 继续执行后面的代码
+
+    至此，已经做了10%
+
+11-12规范代码，功能完善，将权限相关的功能放到rbac的应用APP下以便于以后组件的应用。
+    1，用户登陆和权限初始化 拆分到rbac
+    2，配置文件的应用，权限session的key和白名单放在settings中,便于修改
+    3，Midweares中间件放在rbac中
+    4，固定的模板样式(没有权限和无法访问的好看的样式，用来展示给用户)，也可以放在settings中
+    5, 博客中有详细的不同版本的代码对比
+
+13-15动态菜单功能
+    总结：上面是进行权限控制的代码
+    权限和菜单的关系
+        权限中有URL和名称
+        菜单应该是什么
+        哪些URL能成为菜单呢
+            删除肯定不行，因为有ID
+            应该是可以配置的（因为每个公司的业务和个性），所以在权限表中增加一列，是否可以作为菜单
+        思路:
+            就可以获取到权限中哪些URL可以作为菜单，然后放到另一个列表中，放在session中
+            再次请求时，在中间件中，菜单动态生成
+
+    一级菜单
+        问题：如何动态动态显示一级菜单？
+            a.表结构修改
+                ---添加字段is_menu
+                ---录入数据
+                ---应该还要图标字段icon
+                    字符串格式，在font-Awesome中，后期还要下载字体的CSS到项目中
+
+            b.获取用户的菜单信息并保存到session
+                初始化中获取所有权限
+                    判断是否可以做菜单
+                保存在session中
+            c.模板中显示菜单信息(session中获取)
+                最简单的动态菜单
+                    循环生成
+                        问题1.session的KEY,用的时候去settings里面取，但是我们的视图也要修改，不能直接调用
+                        问题2.active的逻辑（去掉了class=“active”就在随着鼠标懂了）
+                        问题3.模板可能需要根据业务随时更改，需要逻辑，来做一个模板让我们使用的更便捷，
+                            所以要使用inclusion_tag
+                inclusion_tag
+                    创建目录templatetags
+                    创建rbac.py
+                    创建static_menu方法,使用装饰器
+
+                    创建templates目录
+                    创建rbac目录
+                    创建static_menu.html
+
+                    在模板中使用
+                        {% load rbac %}
+                        {% static_menu %}
+                    Library模块
+                        写完之后，出现错误，没有找到这个inclusion_tag，因为没有重启
+                扩展：
+                    解决active问题，二级菜单还会详细
+
+16二级菜单实现思路
+    结构{
+            1：{title：
+                icon：
+                chidren：[]
+                }
+            2：{
+
+                }
+        }
+    循环结构产生二级菜单
+    思考:数据库是否支持我们这样的结构
+        添加父子关系
+            一级不用URL,他只做展示，没有URL
+        修改数据库
+            编写加入菜单表
+    思路:
+        a.session中存储的菜单信息结构，如上
+                结构{
+                        1：{title：
+                            icon：
+                            chidren：[]
+                            }
+                        2：{
+
+                            }
+                    }
+        b.数据库表结构
+            添加menu表
+            权限表增加外键menu
+            class Menu(models.Model):
+                title = models.CharField(verbose_name='一级菜单名称', max_length=32)
+                icon = models.CharField(verbose_name='菜单图标', max_length=32, null=True, blank=True)
+
+
+            class Permission(models.Model):
+                """
+                权限表
+                """
+                title = models.CharField(verbose_name='标题', max_length=32)
+                url = models.CharField(verbose_name='含正则的URL', max_length=128, unique=True)
+
+                menu = models.ForeignKey(verbose_name='二级菜单所属菜单的一级菜单', to='Menu', on_delete=True, null=True,
+                                         blank=True, help_text='null表示该项不是菜单，非null表示二级菜单')
+        c.页面显示二级菜单
+            在inclusion_tag中循环显示
+
+17动态显示二级菜单代码编写
+    流程
+        修改数据库
+        初始化取出菜单(字典格式)
+        修改inclusion_tag
+        修改样式
+        基本完成
+    问题:但是
+        一、菜单的伸缩展开没有编写
+            写JS（复制了佩奇写好的）
+            我们要开发的是组件，这些功能都要放在rbac中，然后在页面中引用
+                (我用的2.1，无法应用到模板中，但是把rbac放在业务web的App下，就能应用了)
+
+        二、字典是无序的
+            有序字典
+                得到排序后的字典的key
+                生成一个空的有序字典
+                给每一个元素添加class:hide,作为默认折叠项
+                循环所有的url，对比当前请求的url，如果匹配上了，就给当前菜单添加class：active，其他的class设置成空
+
+        三、哪个菜单是被访问的
+            显示出来
+            其他项目影藏
+
+18-19动态菜单之非菜单默认选中
+    上面的代码有不严谨的地方
+    比如，点击编辑和添加时，菜单没有被选中项
+    点击某个不是菜单的选项时，指定一个菜单的权限，让其成为默认选中以及展开
+        a.设计数据库---自关联
+        b.思路
+            - 登陆，做权限和菜单的初始化
+                - 获取菜单信息
+                    修改数据结构
+                    {
+                        1:{
+                            title:信息管理
+                            icon:1xxxs
+                            children:[
+                                {id:1, url:/userinfo/list, title:人员列表}  可以做菜单的权限ID
+                            ]
+                        }
+                        2:{
+                            title:信息管理
+                            icon:1xxxs
+                            children:[
+                                {id:7, url:/userinfo/list, title:人员列表}  可以做菜单的权限ID
+                            ]
+                        }
+                    }
+                - 获取权限信息
+                    修改数据结构
+                    [
+                        {id:1, url:/salsd/asdlkj, title:账单列表, pid:null}，  # 客户列表，可以做菜单的权限
+                        {id:2, url:/salsd/asdlkj, title:账单列表, pid:1}，     # pid 有值，关联了可以做菜单的权限的ID，
+                    ]
+            - 再次来访问
+                - 中间件进行权限的校验
+                    获取id和pid,交给inclusion_tag
+                        应该被那一做菜单的权限ID
+                        传递给request
+
+            - 模板中使用inclusion_tag生成动态菜单
+                    选中的菜单的current_selected_permission和每一个菜单ID对比
+                    匹配上了就选中
+
+20动态菜单之路径导航
+    思路
+        初始化权限的时候
+            拿到父权限信息的title,url
+            放到权限列表中
+        中间件中
+            设计路径列表字典，
+                url_record_list = [
+                    {title:首页， url：'#'}
+                ]
+
+            取出当前菜单的名称，有pid的取出父级路径名称
+                如果有pid，添加两层
+                没有，就是自己
+
+            将url_record_list传递给request
+
+    设计inclusion_tag
+
+    让最后一个变成灰色，且不可点击
+        中间件中，最后一个加一个class，做判断，不加href属性
+
+21权限粒度到按钮级别
+    肯定是要判断的，判断是否有权限，然后决定在模板中是否显示按钮
+    修改表结构
+        权限表增加URL别名,且唯一
+    判断是不是在权限的session中
+        初始化中，将permission_list 变成字典，以别名为key
+            为什么要变成字典，以后再做判断的时候，可以直接使用in
+
+        中间件该过来，且循环字典使用dict.values（）
+
+        模板中使用in来判断是否显示按钮
+            管道符和冒号
+            {% if request|has_permission:'customer_add' %}
+                <a class="btn btn-default" href="/customer/add/">
+                    <i class="fa fa-plus-square" aria-hidden="true"></i> 添加客户
+                </a>
+            {% endif %}
+        使用filter
+              注意:最多有两个参数
+              @register.filter
+                def has_permission(request, name):
+                    """
+                    判断是否有权限
+                    :param request: 请求参数相关
+                    :param name: 别名
+                    :return:
+                    """
+                    if name in request.session[settings.PERMISSIONS_SESSION_KEY]:
+                        return True
+                    return None
+        注意:以后在写页面的时候，记得写入权限条件判断，在后台分配好了之后，页面就会自动显示
+
+22权限分配
+    总结和改进
+        1、权限控制
+            初始化获取权限
+            中间件堆所有请求的URL判断是否拥有权限
+            按钮是否拥有权限，是否显示按钮
+        2、动态菜单
+            在后台将权限和菜单做了一个关系
+            用户登录后就可以获取到菜单
+            inclusion_tag进行动态菜单的展示
+        3、权限分配
+            管理员分配了权限之后，所有人才能登陆使用
+                以前的时候，我们是直接操作数据库来实现分配权限
+                    借助Django-admin录入数据，
+
+23权限分配任务拆分
+    1、角色管理
+    2、用户管理
+    3、菜单和权限的管理
+        自动发现和操作权限
+    4、批量的权限操作
+    5、权限分配
+    6、编写使用文档
+
+24权限分配至角色管理
+    角色列表，在rbac中
+        创建views目录
+            role.py
+            def role_list(request):
+                """
+
+                :param request:
+                :return:
+                """
+                role_queryset = models.Role.objects.all()
+                return render(request, 'rbac/role_list.html', {'role_list': role_queryset})
+        路由
+            rbac中的urls
+                app_name = 'rbac'
+                urlpatterns = [
+                    re_path(r'rbac/list', role.role_list),
+                ]
+            整个项目的urls
+                urlpatterns = [
+                    path('admin/', admin.site.urls),
+                    re_path(r'^', include('web.urls')),
+                    re_path(r'^rbac/', include('rbac.urls', namespace='rbac')),
+
+                ]
+        role_list的模板继承了layout.html
+
+        记得区分所有的模板名称，
+        做添加视图和模板
+            之前写URL 都是写死的，有个问题，当url越来越长的时候，一个一个的写很不方便
+            现在要利用name别名，带名称空间，反向生成URL
+                在模板中 {{url “rbac:role_list”}}
+            使用modelForm组件配合bootstrap渲染标签
+                模板中：循环form---field.label、field、filed.error.0
+                视图中：先处理的是get请求-----返回渲染标签
+                            if request.method == "GET"
+                                form = RoleModleForm()
+                                return render(...)
+                            提交post请求后----form = RoleModelForm（data=request.POST）
+                            验证
+                                         ---- if form.is_valid():
+                                         成功后保存到数据库
+                                                    form.save()
+                                                    返回（反向解析URL）
+                                                        return redirect(reverse("rbac:role_list"))
+                                              return render(...)
+                ModelForm中的widgets字段渲染
+                    class RoleModelForm（form.ModelForm）
+                        class Meta:
+                            model = models.Role
+                            fields = ['title']
+                            给标签添加class属性，增加了一个样式，显示效果更好
+                            widgets = {
+                                'title':forms.TextInput(attrs={'class':'form-control'})
+                            }
+
+25权限分配之角色编辑
+    做图标
+    路由URL地址
+        re_path(r"^role/edit/(?P<pk>\d+)/$", role.role_edit,name="role_edit")
+    视图
+    def role_edit(request, pk):
+        obj = 根据获PK值取数据库的角色数据
+        if not obj
+            return 错误或者404
+        如果是GET请求
+            form = RoleModelForm(instans=obj)
+                （注意。要点）
+                渲染到模板的的样子应该和ADD是一样的，唯一的区别是在input框中多了数据
+                    所以可以先借用role_add.html
+                    基于此，
+                    再基于我们标签的渲染是基于各自的ModelForm
+                        所以我们的所有的编辑和添加模板都是一样的，用同一个就可以
+                            把role_add.html改为了change.html 以防止会错意
+            return render(...rbac/chang.html...)
+        如果是POST请求
+            form = RoleModelForm(instans=obj, data=request.POST)
+            if form.is_valid()
+                form.save
+                return redirect(reverse("rbac:role_list"))
+            最后一个return是为了上面的都走不通的时候，返回错误信息
+            return render(...rbac/chang.html...)
+
+    模板中
+        反向生成URLurl rbac:role_edit pk=row.id
+
+27权限分配之角色删除
+    删除之前有一个展示页面，防止难免有点错的时候
+    路由
+        re_path(r"^role/del/(?P<pk>\d+)/$", role.role_del,name="role_del")
+    视图
+        如果是GET请求
+            返回一个提示页面
+        设置一个参数，用于取消的URL 应该是返回到角色列表reverse('rbac：role_list')
+        点击确认之后，post请求还是进入视图，利用pk值直接删除角色数据
+        删除后还是返回到上面的参数对应的URL，即reverse('rbac：role_list')
+
+
+
+    模板
+        这是反向URL，和编辑是类似的
+        模板中提示页面的URL设置
+            这个URL是不应该写死的，因为我们有很多的删除项
+                取消的URL{{cancel}}   cancel是一个变量。在视图中将地址传进去
+
+    代码的规范
+        各司其职
+        整洁
+        把form的代码拆分出去，单独做目录
+28权限分配之角色管理知识总结
+    知识点:
+        - ModelForm
+        - 根据 namespace和 name 反向生成URL
+        - 模板的查找顺序
+            根目录
+            注册APP的顺序
+        - 尽量让写的模板能够重用
+            所有的添加和编辑都使用一个模板
+            所有的删除都是一个模板
+
+29权限分配之用户列表和添加
+    只做用户名、密码、邮箱的添加，角色，权限放在后面单独做 菜单和权限管理 分配
+    路由
+        4个URL路由（增删改查） 和 角色的相似，只用把role改为user
+    views中创建user.py
+    写视图
+
+
+    创建UserModelForm
+        class UserModelForm（form.ModelForm）
+            confirm_password = forms.CharField(label="确认密码")
+            class Meta:
+                model = models.User
+                注意：要增加重复密码的功能，但是我们的数据库中是没有的，自编字段confirm_password
+                fields = ['name','email','password','confirm_password']
+                给标签添加class属性，增加了一个样式，显示效果更好
+                widgets = {
+                    'title':forms.TextInput(attrs={'class':'form-control'})
+                }
+                注意：自定制错误信息
+                error_messages = {
+                    'name':{'required':'用户名不能为空'}，
+                      ...
+                      ...
+                }
+                但是上面的方法需要一个一个去输入，我是一个比较懒得人，Django已经帮我们做好了，他的内部有一个翻译的功能
+                    在settings中把 LANGUAGE_CODE = “zh-hans”
+                样式问题
+                    上面已经说过一种方法了，但是也要一个一个的设置，我们必须偷懒
+                        写一个构造方法,统一给ModelForm的字段添加样式
+                        def __init__(self, *args, **kwargs):
+                            super(UserModelForm,self).__init__(*args, **kwargs)
+                            for name,field in self.fields.items():
+                                field.widget.attrs['class'] = 'form-control'
+
+
+
+            注意：提示密码不一致的信息，钩子函数自定义验证规则
+            def clean_confirm_password(self):
+                password = self.cleaned_data['password']
+                confirm_password = self.cleaned_data['confirm_password']
+                如果不相同，抛出异常
+                from django.core.exceptions import ValidationError
+                if confirm_password != password
+                    raise ValidationError('两次密码不一致')
+                return confirm_password
+
+
+    模板，复制role的
+        序号的循环显示用forloop.counter
+        row.name
+        ...
+        反向生成URL
+
+30权限分配之用户编辑和重置密码
+    有一个需求，在编辑的时候，知识修改用户名和邮箱，不应该包括密码
+    重新创建一个UpdateUserModelForm
+
+    密码的重置
+        模板中添加密码重置的选项
+            URL的反向生成
+        路由添加
+            re_path(user/reset/password/(?P<pk>\d+)/$, user.reset_pwd, name="")
+        forms
+            编写ResetPwdModelForm
+
+        视图
+            改一下
+
+31权限分配之用户删除和知识点总结
+    视图
+        之前的代码改一下表名
+
+    OK
+    知识点总结
+        - 还是role上面的那些
+        - ModelForm
+            - 字段的自定制（confirm_password）
+            - 钩子方法（字段的校验）
+            - 错误提示
+                error_message
+                settings中修改
+            - 重写__init__ 方法，统一给所有字段添加属性
+
+
+32权限分配之一级菜单的展示和选择
+    一级菜单
+        就是读的menu表
+    二级菜单
+        就是乐意做菜单的权限
+    权限
+        无法做菜单的权限
+
+    展示效果，用的就是bootstrap的面板
+        路由
+            re_path(menu/list$, menu.menu_list, name="")
+        视图
+
+        模板
+            页面都差不多，继承layout.html
+            应用bootstrap的面板（代表各的面板）
+            占3个栅格（用col-md-3）
+            点击菜单名，要在二级菜单面板显示对应的菜单项
+                菜单名应该是一个a标签
+                    要点注意：添加属性href="?mid={{ item.id }}传递用来mid
+                    <td><a href="?mid={{ item.id }}"
+                           style="display: block">{{ item.title }}（{{ item.permission_set.count }}）
+                        </a>
+                    </td>
+                当前点击显示为选中
+                    设置css
+                    后端接收mid，前端用用if判断，是否显示
+                        注意：后端接收到的数据类型是字符串，而前端是数字。所以要传换
+                            一种新方法{% if item.id|safe == mid %}，也可以使用其他方法
+33权限分配之一级菜单保留原搜索条件
+    添加菜单一般的做法
+        路由---视图---form---模板，也就是上面一样的做法
+        但是有一个问题，原来如果我们有搜索条件就会消失，因为后台是直接挑战到menu_list
+            - 做保留原搜索条件
+                思路：点击新建时（或者是其他情境）获取原搜索条件---打包---挑战的额时候携带过去
+                    还需要避免的问题
+                        在新建时（或者是其他），页面中也有一个参数，还和我们之前打包的参数一样
+                        如何解决？(Django源码中的做法)
+                            添加按钮
+                                /menu/add/?_filter="mid=3&age=99"
+                            进入添加页面
+                                /menu/add/?_filter="mid=3&age=99"
+                                提交:
+                                    跳转回时再拼接上:/rbac/menu/list/?mid=3&age=99
+                编码：
+                    自定义函数反向生成带有原搜索条件的url，替代了模板中的URL
+                        @register.simple_tag
+                        def memory_url(request，name):
+                            判断，后面有没有参数
+                                没有就不拼接
+                                有就拼接
+                                    获取参数request.GET.urlencode（）
+                                    注意：不能简单的拼接，需要使用QueryDict来转义
+                                            query_dict = QueryDict(mutable=True)
+                                            query_dict['_filter'] = request.GET.urlencode()  # mid=2&age=99
+
+                                            return "%s?%s" % (basic_url, query_dict.urlencode())
+                            return
+                    编辑页面的时候，还会有一个参数，所以对memory_url要加工一下
+                        @register.simple_tag
+                        def memory_url(request，name, *args, **kwargs):
+                            反向生成的时候也需要更改一下,加入参数
+                            basic_url = reverse(request, name, args=args, kwargs=kwargs)
+
+                            return
+
+                    模板中
+                        直接在request中获取要保留的条件的参数
+                        {% memory_url request "rbac:menu_add" %}
+
+                        编辑的时候还需要加工
+                        {% memory_url request "rbac:menu_add" pk=row.id %}
+                    视图中
+                        操作完成之后，拼接URL
+                            url = reverse（'rbac:menu_list'）
+                            origin_params = request.GET.('_filter')
+                            if origin_params:
+                                url = '%s?%s' % (url, origin_params)
+                            return redirect(url)
+
+                    代码规范
+                        在service中创建urls.py
+                            拆分出拼接URL的代码，反向生成URL（保留原条件）
+                            http://127.0.0.1:8888/menu/list/add/?_filter=mid%3D2
+                                1、在url中获取原来搜索条件，如：filter后的值
+                                2、reverse生成原来的url，如：/menu/list/
+                                3、拼接出保留原条件的url：/menu/list/?mid%3D2
+
+34权限分配之一级菜单优化添加和编辑页面图标
+    只需要修改MenuModelForm
+        forms.RadioSelect
+        mark_safe(标记为安全的，显示为html标签)
+
+        ICON_LIST = [
+            ['fa-address-book', '<i aria-hidden="true" class="fa fa-address-book"></i>'],
+            ['fa-address-book-o', '<i aria-hidden="true" class="fa fa-address-book-o"></i>'],
+            ['fa-address-card', '<i aria-hidden="true" class="fa fa-address-card"></i>'],
+            ['fa-address-card-o', '<i aria-hidden="true" class="fa fa-address-card-o"></i>'],
+            ['fa-adjust', '<i aria-hidden="true" class="fa fa-adjust"></i>'],
+            ['fa-american-sign-language-interpreting',
+             '<i aria-hidden="true" class="fa fa-american-sign-language-interpreting"></i>'],
+            ['fa-anchor', '<i aria-hidden="true" class="fa fa-anchor"></i>'],
+            ['fa-archive', '<i aria-hidden="true" class="fa fa-archive"></i>'],
+            ['fa-area-chart', '<i aria-hidden="true" class="fa fa-area-chart"></i>'],
+            ['fa-arrows', '<i aria-hidden="true" class="fa fa-arrows"></i>'],
+            ['fa-arrows-h', '<i aria-hidden="true" class="fa fa-arrows-h"></i>'],
+            ['fa-arrows-v', '<i aria-hidden="true" class="fa fa-arrows-v"></i>'],
+            ['fa-asl-interpreting', '<i aria-hidden="true" class="fa fa-asl-interpreting"></i>'],
+            ['fa-assistive-listening-systems', '<i aria-hidden="true" class="fa fa-assistive-listening-systems"></i>'],
+            ['fa-asterisk', '<i aria-hidden="true" class="fa fa-asterisk"></i>'],
+            ['fa-at', '<i aria-hidden="true" class="fa fa-at"></i>'],
+            ['fa-audio-description', '<i aria-hidden="true" class="fa fa-audio-description"></i>'],
+            ['fa-automobile', '<i aria-hidden="true" class="fa fa-automobile"></i>'],
+            ['fa-balance-scale', '<i aria-hidden="true" class="fa fa-balance-scale"></i>'],
+            ['fa-ban', '<i aria-hidden="true" class="fa fa-ban"></i>'],
+            ['fa-bank', '<i aria-hidden="true" class="fa fa-bank"></i>'],
+            ['fa-bar-chart', '<i aria-hidden="true" class="fa fa-bar-chart"></i>'],
+            ['fa-bar-chart-o', '<i aria-hidden="true" class="fa fa-bar-chart-o"></i>'],
+            ['fa-barcode', '<i aria-hidden="true" class="fa fa-barcode"></i>'],
+            ['fa-bars', '<i aria-hidden="true" class="fa fa-bars"></i>'],
+            ['fa-bath', '<i aria-hidden="true" class="fa fa-bath"></i>'],
+            ['fa-bathtub', '<i aria-hidden="true" class="fa fa-bathtub"></i>'],
+            ['fa-battery', '<i aria-hidden="true" class="fa fa-battery"></i>'],
+            ['fa-battery-0', '<i aria-hidden="true" class="fa fa-battery-0"></i>'],
+            ['fa-battery-1', '<i aria-hidden="true" class="fa fa-battery-1"></i>'],
+            ['fa-battery-2', '<i aria-hidden="true" class="fa fa-battery-2"></i>'],
+            ['fa-battery-3', '<i aria-hidden="true" class="fa fa-battery-3"></i>'],
+            ['fa-battery-4', '<i aria-hidden="true" class="fa fa-battery-4"></i>'],
+            ['fa-battery-empty', '<i aria-hidden="true" class="fa fa-battery-empty"></i>'],
+            ['fa-battery-full', '<i aria-hidden="true" class="fa fa-battery-full"></i>'],
+            ['fa-battery-half', '<i aria-hidden="true" class="fa fa-battery-half"></i>'],
+            ['fa-battery-quarter', '<i aria-hidden="true" class="fa fa-battery-quarter"></i>'],
+            ['fa-battery-three-quarters', '<i aria-hidden="true" class="fa fa-battery-three-quarters"></i>'],
+            ['fa-bed', '<i aria-hidden="true" class="fa fa-bed"></i>'],
+            ['fa-beer', '<i aria-hidden="true" class="fa fa-beer"></i>'],
+            ['fa-bell', '<i aria-hidden="true" class="fa fa-bell"></i>'],
+            ['fa-bell-o', '<i aria-hidden="true" class="fa fa-bell-o"></i>'],
+            ['fa-bell-slash', '<i aria-hidden="true" class="fa fa-bell-slash"></i>'],
+            ['fa-bell-slash-o', '<i aria-hidden="true" class="fa fa-bell-slash-o"></i>'],
+            ['fa-bicycle', '<i aria-hidden="true" class="fa fa-bicycle"></i>'],
+            ['fa-binoculars', '<i aria-hidden="true" class="fa fa-binoculars"></i>'],
+            ['fa-birthday-cake', '<i aria-hidden="true" class="fa fa-birthday-cake"></i>'],
+            ['fa-blind', '<i aria-hidden="true" class="fa fa-blind"></i>'],
+            ['fa-bluetooth', '<i aria-hidden="true" class="fa fa-bluetooth"></i>'],
+            ['fa-bluetooth-b', '<i aria-hidden="true" class="fa fa-bluetooth-b"></i>'],
+            ['fa-bolt', '<i aria-hidden="true" class="fa fa-bolt"></i>'],
+            ['fa-bomb', '<i aria-hidden="true" class="fa fa-bomb"></i>'],
+            ['fa-book', '<i aria-hidden="true" class="fa fa-book"></i>'],
+            ['fa-bookmark', '<i aria-hidden="true" class="fa fa-bookmark"></i>'],
+            ['fa-bookmark-o', '<i aria-hidden="true" class="fa fa-bookmark-o"></i>'],
+            ['fa-braille', '<i aria-hidden="true" class="fa fa-braille"></i>'],
+            ['fa-briefcase', '<i aria-hidden="true" class="fa fa-briefcase"></i>'],
+            ['fa-bug', '<i aria-hidden="true" class="fa fa-bug"></i>'],
+            ['fa-building', '<i aria-hidden="true" class="fa fa-building"></i>'],
+            ['fa-building-o', '<i aria-hidden="true" class="fa fa-building-o"></i>'],
+            ['fa-bullhorn', '<i aria-hidden="true" class="fa fa-bullhorn"></i>'],
+            ['fa-bullseye', '<i aria-hidden="true" class="fa fa-bullseye"></i>'],
+            ['fa-bus', '<i aria-hidden="true" class="fa fa-bus"></i>'],
+            ['fa-cab', '<i aria-hidden="true" class="fa fa-cab"></i>'],
+            ['fa-calculator', '<i aria-hidden="true" class="fa fa-calculator"></i>'],
+            ['fa-calendar', '<i aria-hidden="true" class="fa fa-calendar"></i>'],
+            ['fa-calendar-check-o', '<i aria-hidden="true" class="fa fa-calendar-check-o"></i>'],
+            ['fa-calendar-minus-o', '<i aria-hidden="true" class="fa fa-calendar-minus-o"></i>'],
+            ['fa-calendar-o', '<i aria-hidden="true" class="fa fa-calendar-o"></i>'],
+            ['fa-calendar-plus-o', '<i aria-hidden="true" class="fa fa-calendar-plus-o"></i>'],
+            ['fa-calendar-times-o', '<i aria-hidden="true" class="fa fa-calendar-times-o"></i>'],
+            ['fa-camera', '<i aria-hidden="true" class="fa fa-camera"></i>'],
+            ['fa-camera-retro', '<i aria-hidden="true" class="fa fa-camera-retro"></i>'],
+            ['fa-car', '<i aria-hidden="true" class="fa fa-car"></i>'],
+            ['fa-caret-square-o-down', '<i aria-hidden="true" class="fa fa-caret-square-o-down"></i>'],
+            ['fa-caret-square-o-left', '<i aria-hidden="true" class="fa fa-caret-square-o-left"></i>'],
+            ['fa-caret-square-o-right', '<i aria-hidden="true" class="fa fa-caret-square-o-right"></i>'],
+            ['fa-caret-square-o-up', '<i aria-hidden="true" class="fa fa-caret-square-o-up"></i>'],
+            ['fa-cart-arrow-down', '<i aria-hidden="true" class="fa fa-cart-arrow-down"></i>'],
+            ['fa-cart-plus', '<i aria-hidden="true" class="fa fa-cart-plus"></i>'],
+            ['fa-cc', '<i aria-hidden="true" class="fa fa-cc"></i>'],
+            ['fa-certificate', '<i aria-hidden="true" class="fa fa-certificate"></i>'],
+            ['fa-check', '<i aria-hidden="true" class="fa fa-check"></i>'],
+            ['fa-check-circle', '<i aria-hidden="true" class="fa fa-check-circle"></i>'],
+            ['fa-check-circle-o', '<i aria-hidden="true" class="fa fa-check-circle-o"></i>'],
+            ['fa-check-square', '<i aria-hidden="true" class="fa fa-check-square"></i>'],
+            ['fa-check-square-o', '<i aria-hidden="true" class="fa fa-check-square-o"></i>'],
+            ['fa-child', '<i aria-hidden="true" class="fa fa-child"></i>'],
+            ['fa-circle', '<i aria-hidden="true" class="fa fa-circle"></i>'],
+            ['fa-circle-o', '<i aria-hidden="true" class="fa fa-circle-o"></i>'],
+            ['fa-circle-o-notch', '<i aria-hidden="true" class="fa fa-circle-o-notch"></i>'],
+            ['fa-circle-thin', '<i aria-hidden="true" class="fa fa-circle-thin"></i>'],
+            ['fa-clock-o', '<i aria-hidden="true" class="fa fa-clock-o"></i>'],
+            ['fa-clone', '<i aria-hidden="true" class="fa fa-clone"></i>'],
+            ['fa-close', '<i aria-hidden="true" class="fa fa-close"></i>'],
+            ['fa-cloud', '<i aria-hidden="true" class="fa fa-cloud"></i>'],
+            ['fa-cloud-download', '<i aria-hidden="true" class="fa fa-cloud-download"></i>'],
+            ['fa-cloud-upload', '<i aria-hidden="true" class="fa fa-cloud-upload"></i>'],
+            ['fa-code', '<i aria-hidden="true" class="fa fa-code"></i>'],
+            ['fa-code-fork', '<i aria-hidden="true" class="fa fa-code-fork"></i>'],
+            ['fa-coffee', '<i aria-hidden="true" class="fa fa-coffee"></i>'],
+            ['fa-cog', '<i aria-hidden="true" class="fa fa-cog"></i>'],
+            ['fa-cogs', '<i aria-hidden="true" class="fa fa-cogs"></i>'],
+            ['fa-comment', '<i aria-hidden="true" class="fa fa-comment"></i>'],
+            ['fa-comment-o', '<i aria-hidden="true" class="fa fa-comment-o"></i>'],
+            ['fa-commenting', '<i aria-hidden="true" class="fa fa-commenting"></i>'],
+            ['fa-commenting-o', '<i aria-hidden="true" class="fa fa-commenting-o"></i>'],
+            ['fa-comments', '<i aria-hidden="true" class="fa fa-comments"></i>'],
+            ['fa-comments-o', '<i aria-hidden="true" class="fa fa-comments-o"></i>'],
+            ['fa-compass', '<i aria-hidden="true" class="fa fa-compass"></i>'],
+            ['fa-copyright', '<i aria-hidden="true" class="fa fa-copyright"></i>'],
+            ['fa-creative-commons', '<i aria-hidden="true" class="fa fa-creative-commons"></i>'],
+            ['fa-credit-card', '<i aria-hidden="true" class="fa fa-credit-card"></i>'],
+            ['fa-credit-card-alt', '<i aria-hidden="true" class="fa fa-credit-card-alt"></i>'],
+            ['fa-crop', '<i aria-hidden="true" class="fa fa-crop"></i>'],
+            ['fa-crosshairs', '<i aria-hidden="true" class="fa fa-crosshairs"></i>'],
+            ['fa-cube', '<i aria-hidden="true" class="fa fa-cube"></i>'],
+            ['fa-cubes', '<i aria-hidden="true" class="fa fa-cubes"></i>'],
+            ['fa-cutlery', '<i aria-hidden="true" class="fa fa-cutlery"></i>'],
+            ['fa-dashboard', '<i aria-hidden="true" class="fa fa-dashboard"></i>'],
+            ['fa-database', '<i aria-hidden="true" class="fa fa-database"></i>'],
+            ['fa-deaf', '<i aria-hidden="true" class="fa fa-deaf"></i>'],
+            ['fa-deafness', '<i aria-hidden="true" class="fa fa-deafness"></i>'],
+            ['fa-desktop', '<i aria-hidden="true" class="fa fa-desktop"></i>'],
+            ['fa-diamond', '<i aria-hidden="true" class="fa fa-diamond"></i>'],
+            ['fa-dot-circle-o', '<i aria-hidden="true" class="fa fa-dot-circle-o"></i>'],
+            ['fa-download', '<i aria-hidden="true" class="fa fa-download"></i>'],
+            ['fa-drivers-license', '<i aria-hidden="true" class="fa fa-drivers-license"></i>'],
+            ['fa-drivers-license-o', '<i aria-hidden="true" class="fa fa-drivers-license-o"></i>'],
+            ['fa-edit', '<i aria-hidden="true" class="fa fa-edit"></i>'],
+            ['fa-ellipsis-h', '<i aria-hidden="true" class="fa fa-ellipsis-h"></i>'],
+            ['fa-ellipsis-v', '<i aria-hidden="true" class="fa fa-ellipsis-v"></i>'],
+            ['fa-envelope', '<i aria-hidden="true" class="fa fa-envelope"></i>'],
+            ['fa-envelope-o', '<i aria-hidden="true" class="fa fa-envelope-o"></i>'],
+            ['fa-envelope-open', '<i aria-hidden="true" class="fa fa-envelope-open"></i>'],
+            ['fa-envelope-open-o', '<i aria-hidden="true" class="fa fa-envelope-open-o"></i>'],
+            ['fa-envelope-square', '<i aria-hidden="true" class="fa fa-envelope-square"></i>'],
+            ['fa-eraser', '<i aria-hidden="true" class="fa fa-eraser"></i>'],
+            ['fa-exchange', '<i aria-hidden="true" class="fa fa-exchange"></i>'],
+            ['fa-exclamation', '<i aria-hidden="true" class="fa fa-exclamation"></i>'],
+            ['fa-exclamation-circle', '<i aria-hidden="true" class="fa fa-exclamation-circle"></i>'],
+            ['fa-exclamation-triangle', '<i aria-hidden="true" class="fa fa-exclamation-triangle"></i>'],
+            ['fa-external-link', '<i aria-hidden="true" class="fa fa-external-link"></i>'],
+            ['fa-external-link-square', '<i aria-hidden="true" class="fa fa-external-link-square"></i>'],
+            ['fa-eye', '<i aria-hidden="true" class="fa fa-eye"></i>'],
+            ['fa-eye-slash', '<i aria-hidden="true" class="fa fa-eye-slash"></i>'],
+            ['fa-eyedropper', '<i aria-hidden="true" class="fa fa-eyedropper"></i>'],
+            ['fa-fax', '<i aria-hidden="true" class="fa fa-fax"></i>'],
+            ['fa-feed', '<i aria-hidden="true" class="fa fa-feed"></i>'],
+            ['fa-female', '<i aria-hidden="true" class="fa fa-female"></i>'],
+            ['fa-fighter-jet', '<i aria-hidden="true" class="fa fa-fighter-jet"></i>'],
+            ['fa-file-archive-o', '<i aria-hidden="true" class="fa fa-file-archive-o"></i>'],
+            ['fa-file-audio-o', '<i aria-hidden="true" class="fa fa-file-audio-o"></i>'],
+            ['fa-file-code-o', '<i aria-hidden="true" class="fa fa-file-code-o"></i>'],
+            ['fa-file-excel-o', '<i aria-hidden="true" class="fa fa-file-excel-o"></i>'],
+            ['fa-file-image-o', '<i aria-hidden="true" class="fa fa-file-image-o"></i>'],
+            ['fa-file-movie-o', '<i aria-hidden="true" class="fa fa-file-movie-o"></i>'],
+            ['fa-file-pdf-o', '<i aria-hidden="true" class="fa fa-file-pdf-o"></i>'],
+            ['fa-file-photo-o', '<i aria-hidden="true" class="fa fa-file-photo-o"></i>'],
+            ['fa-file-picture-o', '<i aria-hidden="true" class="fa fa-file-picture-o"></i>'],
+            ['fa-file-powerpoint-o', '<i aria-hidden="true" class="fa fa-file-powerpoint-o"></i>'],
+            ['fa-file-sound-o', '<i aria-hidden="true" class="fa fa-file-sound-o"></i>'],
+            ['fa-file-video-o', '<i aria-hidden="true" class="fa fa-file-video-o"></i>'],
+            ['fa-file-word-o', '<i aria-hidden="true" class="fa fa-file-word-o"></i>'],
+            ['fa-file-zip-o', '<i aria-hidden="true" class="fa fa-file-zip-o"></i>'],
+            ['fa-film', '<i aria-hidden="true" class="fa fa-film"></i>'],
+            ['fa-filter', '<i aria-hidden="true" class="fa fa-filter"></i>'],
+            ['fa-fire', '<i aria-hidden="true" class="fa fa-fire"></i>'],
+            ['fa-fire-extinguisher', '<i aria-hidden="true" class="fa fa-fire-extinguisher"></i>'],
+            ['fa-flag', '<i aria-hidden="true" class="fa fa-flag"></i>'],
+            ['fa-flag-checkered', '<i aria-hidden="true" class="fa fa-flag-checkered"></i>'],
+            ['fa-flag-o', '<i aria-hidden="true" class="fa fa-flag-o"></i>'],
+            ['fa-flash', '<i aria-hidden="true" class="fa fa-flash"></i>'],
+            ['fa-flask', '<i aria-hidden="true" class="fa fa-flask"></i>'],
+            ['fa-folder', '<i aria-hidden="true" class="fa fa-folder"></i>'],
+            ['fa-folder-o', '<i aria-hidden="true" class="fa fa-folder-o"></i>'],
+            ['fa-folder-open', '<i aria-hidden="true" class="fa fa-folder-open"></i>'],
+            ['fa-folder-open-o', '<i aria-hidden="true" class="fa fa-folder-open-o"></i>'],
+            ['fa-frown-o', '<i aria-hidden="true" class="fa fa-frown-o"></i>'],
+            ['fa-futbol-o', '<i aria-hidden="true" class="fa fa-futbol-o"></i>'],
+            ['fa-gamepad', '<i aria-hidden="true" class="fa fa-gamepad"></i>'],
+            ['fa-gavel', '<i aria-hidden="true" class="fa fa-gavel"></i>'],
+            ['fa-gear', '<i aria-hidden="true" class="fa fa-gear"></i>'],
+            ['fa-gears', '<i aria-hidden="true" class="fa fa-gears"></i>'],
+            ['fa-gift', '<i aria-hidden="true" class="fa fa-gift"></i>'],
+            ['fa-glass', '<i aria-hidden="true" class="fa fa-glass"></i>'],
+            ['fa-globe', '<i aria-hidden="true" class="fa fa-globe"></i>'],
+            ['fa-graduation-cap', '<i aria-hidden="true" class="fa fa-graduation-cap"></i>'],
+            ['fa-group', '<i aria-hidden="true" class="fa fa-group"></i>'],
+            ['fa-hand-grab-o', '<i aria-hidden="true" class="fa fa-hand-grab-o"></i>'],
+            ['fa-hand-lizard-o', '<i aria-hidden="true" class="fa fa-hand-lizard-o"></i>'],
+            ['fa-hand-paper-o', '<i aria-hidden="true" class="fa fa-hand-paper-o"></i>'],
+            ['fa-hand-peace-o', '<i aria-hidden="true" class="fa fa-hand-peace-o"></i>'],
+            ['fa-hand-pointer-o', '<i aria-hidden="true" class="fa fa-hand-pointer-o"></i>'],
+            ['fa-hand-rock-o', '<i aria-hidden="true" class="fa fa-hand-rock-o"></i>'],
+            ['fa-hand-scissors-o', '<i aria-hidden="true" class="fa fa-hand-scissors-o"></i>'],
+            ['fa-hand-spock-o', '<i aria-hidden="true" class="fa fa-hand-spock-o"></i>'],
+            ['fa-hand-stop-o', '<i aria-hidden="true" class="fa fa-hand-stop-o"></i>'],
+            ['fa-handshake-o', '<i aria-hidden="true" class="fa fa-handshake-o"></i>'],
+            ['fa-hard-of-hearing', '<i aria-hidden="true" class="fa fa-hard-of-hearing"></i>'],
+            ['fa-hashtag', '<i aria-hidden="true" class="fa fa-hashtag"></i>'],
+            ['fa-hdd-o', '<i aria-hidden="true" class="fa fa-hdd-o"></i>'],
+            ['fa-headphones', '<i aria-hidden="true" class="fa fa-headphones"></i>'],
+            ['fa-heart', '<i aria-hidden="true" class="fa fa-heart"></i>'],
+            ['fa-heart-o', '<i aria-hidden="true" class="fa fa-heart-o"></i>'],
+            ['fa-heartbeat', '<i aria-hidden="true" class="fa fa-heartbeat"></i>'],
+            ['fa-history', '<i aria-hidden="true" class="fa fa-history"></i>'],
+            ['fa-home', '<i aria-hidden="true" class="fa fa-home"></i>'],
+            ['fa-hotel', '<i aria-hidden="true" class="fa fa-hotel"></i>'],
+            ['fa-hourglass', '<i aria-hidden="true" class="fa fa-hourglass"></i>'],
+            ['fa-hourglass-1', '<i aria-hidden="true" class="fa fa-hourglass-1"></i>'],
+            ['fa-hourglass-2', '<i aria-hidden="true" class="fa fa-hourglass-2"></i>'],
+            ['fa-hourglass-3', '<i aria-hidden="true" class="fa fa-hourglass-3"></i>'],
+            ['fa-hourglass-end', '<i aria-hidden="true" class="fa fa-hourglass-end"></i>'],
+            ['fa-hourglass-half', '<i aria-hidden="true" class="fa fa-hourglass-half"></i>'],
+            ['fa-hourglass-o', '<i aria-hidden="true" class="fa fa-hourglass-o"></i>'],
+            ['fa-hourglass-start', '<i aria-hidden="true" class="fa fa-hourglass-start"></i>'],
+            ['fa-i-cursor', '<i aria-hidden="true" class="fa fa-i-cursor"></i>'],
+            ['fa-id-badge', '<i aria-hidden="true" class="fa fa-id-badge"></i>'],
+            ['fa-id-card', '<i aria-hidden="true" class="fa fa-id-card"></i>'],
+            ['fa-id-card-o', '<i aria-hidden="true" class="fa fa-id-card-o"></i>'],
+            ['fa-image', '<i aria-hidden="true" class="fa fa-image"></i>'],
+            ['fa-inbox', '<i aria-hidden="true" class="fa fa-inbox"></i>'],
+            ['fa-industry', '<i aria-hidden="true" class="fa fa-industry"></i>'],
+            ['fa-info', '<i aria-hidden="true" class="fa fa-info"></i>'],
+            ['fa-info-circle', '<i aria-hidden="true" class="fa fa-info-circle"></i>'],
+            ['fa-institution', '<i aria-hidden="true" class="fa fa-institution"></i>'],
+            ['fa-key', '<i aria-hidden="true" class="fa fa-key"></i>'],
+            ['fa-keyboard-o', '<i aria-hidden="true" class="fa fa-keyboard-o"></i>'],
+            ['fa-language', '<i aria-hidden="true" class="fa fa-language"></i>'],
+            ['fa-laptop', '<i aria-hidden="true" class="fa fa-laptop"></i>'],
+            ['fa-leaf', '<i aria-hidden="true" class="fa fa-leaf"></i>'],
+            ['fa-legal', '<i aria-hidden="true" class="fa fa-legal"></i>'],
+            ['fa-lemon-o', '<i aria-hidden="true" class="fa fa-lemon-o"></i>'],
+            ['fa-level-down', '<i aria-hidden="true" class="fa fa-level-down"></i>'],
+            ['fa-level-up', '<i aria-hidden="true" class="fa fa-level-up"></i>'],
+            ['fa-life-bouy', '<i aria-hidden="true" class="fa fa-life-bouy"></i>'],
+            ['fa-life-buoy', '<i aria-hidden="true" class="fa fa-life-buoy"></i>'],
+            ['fa-life-ring', '<i aria-hidden="true" class="fa fa-life-ring"></i>'],
+            ['fa-life-saver', '<i aria-hidden="true" class="fa fa-life-saver"></i>'],
+            ['fa-lightbulb-o', '<i aria-hidden="true" class="fa fa-lightbulb-o"></i>'],
+            ['fa-line-chart', '<i aria-hidden="true" class="fa fa-line-chart"></i>'],
+            ['fa-location-arrow', '<i aria-hidden="true" class="fa fa-location-arrow"></i>'],
+            ['fa-lock', '<i aria-hidden="true" class="fa fa-lock"></i>'],
+            ['fa-low-vision', '<i aria-hidden="true" class="fa fa-low-vision"></i>'],
+            ['fa-magic', '<i aria-hidden="true" class="fa fa-magic"></i>'],
+            ['fa-magnet', '<i aria-hidden="true" class="fa fa-magnet"></i>'],
+            ['fa-mail-forward', '<i aria-hidden="true" class="fa fa-mail-forward"></i>'],
+            ['fa-mail-reply', '<i aria-hidden="true" class="fa fa-mail-reply"></i>'],
+            ['fa-mail-reply-all', '<i aria-hidden="true" class="fa fa-mail-reply-all"></i>'],
+            ['fa-male', '<i aria-hidden="true" class="fa fa-male"></i>'],
+            ['fa-map', '<i aria-hidden="true" class="fa fa-map"></i>'],
+            ['fa-map-marker', '<i aria-hidden="true" class="fa fa-map-marker"></i>'],
+            ['fa-map-o', '<i aria-hidden="true" class="fa fa-map-o"></i>'],
+            ['fa-map-pin', '<i aria-hidden="true" class="fa fa-map-pin"></i>'],
+            ['fa-map-signs', '<i aria-hidden="true" class="fa fa-map-signs"></i>'],
+            ['fa-meh-o', '<i aria-hidden="true" class="fa fa-meh-o"></i>'],
+            ['fa-microchip', '<i aria-hidden="true" class="fa fa-microchip"></i>'],
+            ['fa-microphone', '<i aria-hidden="true" class="fa fa-microphone"></i>'],
+            ['fa-microphone-slash', '<i aria-hidden="true" class="fa fa-microphone-slash"></i>'],
+            ['fa-minus', '<i aria-hidden="true" class="fa fa-minus"></i>'],
+            ['fa-minus-circle', '<i aria-hidden="true" class="fa fa-minus-circle"></i>'],
+            ['fa-minus-square', '<i aria-hidden="true" class="fa fa-minus-square"></i>'],
+            ['fa-minus-square-o', '<i aria-hidden="true" class="fa fa-minus-square-o"></i>'],
+            ['fa-mobile', '<i aria-hidden="true" class="fa fa-mobile"></i>'],
+            ['fa-mobile-phone', '<i aria-hidden="true" class="fa fa-mobile-phone"></i>'],
+            ['fa-money', '<i aria-hidden="true" class="fa fa-money"></i>'],
+            ['fa-moon-o', '<i aria-hidden="true" class="fa fa-moon-o"></i>'],
+            ['fa-mortar-board', '<i aria-hidden="true" class="fa fa-mortar-board"></i>'],
+            ['fa-motorcycle', '<i aria-hidden="true" class="fa fa-motorcycle"></i>'],
+            ['fa-mouse-pointer', '<i aria-hidden="true" class="fa fa-mouse-pointer"></i>'],
+            ['fa-music', '<i aria-hidden="true" class="fa fa-music"></i>'],
+            ['fa-navicon', '<i aria-hidden="true" class="fa fa-navicon"></i>'],
+            ['fa-newspaper-o', '<i aria-hidden="true" class="fa fa-newspaper-o"></i>'],
+            ['fa-object-group', '<i aria-hidden="true" class="fa fa-object-group"></i>'],
+            ['fa-object-ungroup', '<i aria-hidden="true" class="fa fa-object-ungroup"></i>'],
+            ['fa-paint-brush', '<i aria-hidden="true" class="fa fa-paint-brush"></i>'],
+            ['fa-paper-plane', '<i aria-hidden="true" class="fa fa-paper-plane"></i>'],
+            ['fa-paper-plane-o', '<i aria-hidden="true" class="fa fa-paper-plane-o"></i>'],
+            ['fa-paw', '<i aria-hidden="true" class="fa fa-paw"></i>'],
+            ['fa-pencil', '<i aria-hidden="true" class="fa fa-pencil"></i>'],
+            ['fa-pencil-square', '<i aria-hidden="true" class="fa fa-pencil-square"></i>'],
+            ['fa-pencil-square-o', '<i aria-hidden="true" class="fa fa-pencil-square-o"></i>'],
+            ['fa-percent', '<i aria-hidden="true" class="fa fa-percent"></i>'],
+            ['fa-phone', '<i aria-hidden="true" class="fa fa-phone"></i>'],
+            ['fa-phone-square', '<i aria-hidden="true" class="fa fa-phone-square"></i>'],
+            ['fa-photo', '<i aria-hidden="true" class="fa fa-photo"></i>'],
+            ['fa-picture-o', '<i aria-hidden="true" class="fa fa-picture-o"></i>'],
+            ['fa-pie-chart', '<i aria-hidden="true" class="fa fa-pie-chart"></i>'],
+            ['fa-plane', '<i aria-hidden="true" class="fa fa-plane"></i>'],
+            ['fa-plug', '<i aria-hidden="true" class="fa fa-plug"></i>'],
+            ['fa-plus', '<i aria-hidden="true" class="fa fa-plus"></i>'],
+            ['fa-plus-circle', '<i aria-hidden="true" class="fa fa-plus-circle"></i>'],
+            ['fa-plus-square', '<i aria-hidden="true" class="fa fa-plus-square"></i>'],
+            ['fa-plus-square-o', '<i aria-hidden="true" class="fa fa-plus-square-o"></i>'],
+            ['fa-podcast', '<i aria-hidden="true" class="fa fa-podcast"></i>'],
+            ['fa-power-off', '<i aria-hidden="true" class="fa fa-power-off"></i>'],
+            ['fa-print', '<i aria-hidden="true" class="fa fa-print"></i>'],
+            ['fa-puzzle-piece', '<i aria-hidden="true" class="fa fa-puzzle-piece"></i>'],
+            ['fa-qrcode', '<i aria-hidden="true" class="fa fa-qrcode"></i>'],
+            ['fa-question', '<i aria-hidden="true" class="fa fa-question"></i>'],
+            ['fa-question-circle', '<i aria-hidden="true" class="fa fa-question-circle"></i>'],
+            ['fa-question-circle-o', '<i aria-hidden="true" class="fa fa-question-circle-o"></i>'],
+            ['fa-quote-left', '<i aria-hidden="true" class="fa fa-quote-left"></i>'],
+            ['fa-quote-right', '<i aria-hidden="true" class="fa fa-quote-right"></i>'],
+            ['fa-random', '<i aria-hidden="true" class="fa fa-random"></i>'],
+            ['fa-recycle', '<i aria-hidden="true" class="fa fa-recycle"></i>'],
+            ['fa-refresh', '<i aria-hidden="true" class="fa fa-refresh"></i>'],
+            ['fa-registered', '<i aria-hidden="true" class="fa fa-registered"></i>'],
+            ['fa-remove', '<i aria-hidden="true" class="fa fa-remove"></i>'],
+            ['fa-reorder', '<i aria-hidden="true" class="fa fa-reorder"></i>'],
+            ['fa-reply', '<i aria-hidden="true" class="fa fa-reply"></i>'],
+            ['fa-reply-all', '<i aria-hidden="true" class="fa fa-reply-all"></i>'],
+            ['fa-retweet', '<i aria-hidden="true" class="fa fa-retweet"></i>'],
+            ['fa-road', '<i aria-hidden="true" class="fa fa-road"></i>'],
+            ['fa-rocket', '<i aria-hidden="true" class="fa fa-rocket"></i>'],
+            ['fa-rss', '<i aria-hidden="true" class="fa fa-rss"></i>'],
+            ['fa-rss-square', '<i aria-hidden="true" class="fa fa-rss-square"></i>'],
+            ['fa-s15', '<i aria-hidden="true" class="fa fa-s15"></i>'],
+            ['fa-search', '<i aria-hidden="true" class="fa fa-search"></i>'],
+            ['fa-search-minus', '<i aria-hidden="true" class="fa fa-search-minus"></i>'],
+            ['fa-search-plus', '<i aria-hidden="true" class="fa fa-search-plus"></i>'],
+            ['fa-send', '<i aria-hidden="true" class="fa fa-send"></i>'],
+            ['fa-send-o', '<i aria-hidden="true" class="fa fa-send-o"></i>'],
+            ['fa-server', '<i aria-hidden="true" class="fa fa-server"></i>'],
+            ['fa-share', '<i aria-hidden="true" class="fa fa-share"></i>'],
+            ['fa-share-alt', '<i aria-hidden="true" class="fa fa-share-alt"></i>'],
+            ['fa-share-alt-square', '<i aria-hidden="true" class="fa fa-share-alt-square"></i>'],
+            ['fa-share-square', '<i aria-hidden="true" class="fa fa-share-square"></i>'],
+            ['fa-share-square-o', '<i aria-hidden="true" class="fa fa-share-square-o"></i>'],
+            ['fa-shield', '<i aria-hidden="true" class="fa fa-shield"></i>'],
+            ['fa-ship', '<i aria-hidden="true" class="fa fa-ship"></i>'],
+            ['fa-shopping-bag', '<i aria-hidden="true" class="fa fa-shopping-bag"></i>'],
+            ['fa-shopping-basket', '<i aria-hidden="true" class="fa fa-shopping-basket"></i>'],
+            ['fa-shopping-cart', '<i aria-hidden="true" class="fa fa-shopping-cart"></i>'],
+            ['fa-shower', '<i aria-hidden="true" class="fa fa-shower"></i>'],
+            ['fa-sign-in', '<i aria-hidden="true" class="fa fa-sign-in"></i>'],
+            ['fa-sign-language', '<i aria-hidden="true" class="fa fa-sign-language"></i>'],
+            ['fa-sign-out', '<i aria-hidden="true" class="fa fa-sign-out"></i>'],
+            ['fa-signal', '<i aria-hidden="true" class="fa fa-signal"></i>'],
+            ['fa-signing', '<i aria-hidden="true" class="fa fa-signing"></i>'],
+            ['fa-sitemap', '<i aria-hidden="true" class="fa fa-sitemap"></i>'],
+            ['fa-sliders', '<i aria-hidden="true" class="fa fa-sliders"></i>'],
+            ['fa-smile-o', '<i aria-hidden="true" class="fa fa-smile-o"></i>'],
+            ['fa-snowflake-o', '<i aria-hidden="true" class="fa fa-snowflake-o"></i>'],
+            ['fa-soccer-ball-o', '<i aria-hidden="true" class="fa fa-soccer-ball-o"></i>'],
+            ['fa-sort', '<i aria-hidden="true" class="fa fa-sort"></i>'],
+            ['fa-sort-alpha-asc', '<i aria-hidden="true" class="fa fa-sort-alpha-asc"></i>'],
+            ['fa-sort-alpha-desc', '<i aria-hidden="true" class="fa fa-sort-alpha-desc"></i>'],
+            ['fa-sort-amount-asc', '<i aria-hidden="true" class="fa fa-sort-amount-asc"></i>'],
+            ['fa-sort-amount-desc', '<i aria-hidden="true" class="fa fa-sort-amount-desc"></i>'],
+            ['fa-sort-asc', '<i aria-hidden="true" class="fa fa-sort-asc"></i>'],
+            ['fa-sort-desc', '<i aria-hidden="true" class="fa fa-sort-desc"></i>'],
+            ['fa-sort-down', '<i aria-hidden="true" class="fa fa-sort-down"></i>'],
+            ['fa-sort-numeric-asc', '<i aria-hidden="true" class="fa fa-sort-numeric-asc"></i>'],
+            ['fa-sort-numeric-desc', '<i aria-hidden="true" class="fa fa-sort-numeric-desc"></i>'],
+            ['fa-sort-up', '<i aria-hidden="true" class="fa fa-sort-up"></i>'],
+            ['fa-space-shuttle', '<i aria-hidden="true" class="fa fa-space-shuttle"></i>'],
+            ['fa-spinner', '<i aria-hidden="true" class="fa fa-spinner"></i>'],
+            ['fa-spoon', '<i aria-hidden="true" class="fa fa-spoon"></i>'],
+            ['fa-square', '<i aria-hidden="true" class="fa fa-square"></i>'],
+            ['fa-square-o', '<i aria-hidden="true" class="fa fa-square-o"></i>'],
+            ['fa-star', '<i aria-hidden="true" class="fa fa-star"></i>'],
+            ['fa-star-half', '<i aria-hidden="true" class="fa fa-star-half"></i>'],
+            ['fa-star-half-empty', '<i aria-hidden="true" class="fa fa-star-half-empty"></i>'],
+            ['fa-star-half-full', '<i aria-hidden="true" class="fa fa-star-half-full"></i>'],
+            ['fa-star-half-o', '<i aria-hidden="true" class="fa fa-star-half-o"></i>'],
+            ['fa-star-o', '<i aria-hidden="true" class="fa fa-star-o"></i>'],
+            ['fa-sticky-note', '<i aria-hidden="true" class="fa fa-sticky-note"></i>'],
+            ['fa-sticky-note-o', '<i aria-hidden="true" class="fa fa-sticky-note-o"></i>'],
+            ['fa-street-view', '<i aria-hidden="true" class="fa fa-street-view"></i>'],
+            ['fa-suitcase', '<i aria-hidden="true" class="fa fa-suitcase"></i>'],
+            ['fa-sun-o', '<i aria-hidden="true" class="fa fa-sun-o"></i>'],
+            ['fa-support', '<i aria-hidden="true" class="fa fa-support"></i>'],
+            ['fa-tablet', '<i aria-hidden="true" class="fa fa-tablet"></i>'],
+            ['fa-tachometer', '<i aria-hidden="true" class="fa fa-tachometer"></i>'],
+            ['fa-tag', '<i aria-hidden="true" class="fa fa-tag"></i>'],
+            ['fa-tags', '<i aria-hidden="true" class="fa fa-tags"></i>'],
+            ['fa-tasks', '<i aria-hidden="true" class="fa fa-tasks"></i>'],
+            ['fa-taxi', '<i aria-hidden="true" class="fa fa-taxi"></i>'],
+            ['fa-television', '<i aria-hidden="true" class="fa fa-television"></i>'],
+            ['fa-terminal', '<i aria-hidden="true" class="fa fa-terminal"></i>'],
+            ['fa-thermometer', '<i aria-hidden="true" class="fa fa-thermometer"></i>'],
+            ['fa-thermometer-0', '<i aria-hidden="true" class="fa fa-thermometer-0"></i>'],
+            ['fa-thermometer-1', '<i aria-hidden="true" class="fa fa-thermometer-1"></i>'],
+            ['fa-thermometer-2', '<i aria-hidden="true" class="fa fa-thermometer-2"></i>'],
+            ['fa-thermometer-3', '<i aria-hidden="true" class="fa fa-thermometer-3"></i>'],
+            ['fa-thermometer-4', '<i aria-hidden="true" class="fa fa-thermometer-4"></i>'],
+            ['fa-thermometer-empty', '<i aria-hidden="true" class="fa fa-thermometer-empty"></i>'],
+            ['fa-thermometer-full', '<i aria-hidden="true" class="fa fa-thermometer-full"></i>'],
+            ['fa-thermometer-half', '<i aria-hidden="true" class="fa fa-thermometer-half"></i>'],
+            ['fa-thermometer-quarter', '<i aria-hidden="true" class="fa fa-thermometer-quarter"></i>'],
+            ['fa-thermometer-three-quarters', '<i aria-hidden="true" class="fa fa-thermometer-three-quarters"></i>'],
+            ['fa-thumb-tack', '<i aria-hidden="true" class="fa fa-thumb-tack"></i>'],
+            ['fa-thumbs-down', '<i aria-hidden="true" class="fa fa-thumbs-down"></i>'],
+            ['fa-thumbs-o-down', '<i aria-hidden="true" class="fa fa-thumbs-o-down"></i>'],
+            ['fa-thumbs-o-up', '<i aria-hidden="true" class="fa fa-thumbs-o-up"></i>'],
+            ['fa-thumbs-up', '<i aria-hidden="true" class="fa fa-thumbs-up"></i>'],
+            ['fa-ticket', '<i aria-hidden="true" class="fa fa-ticket"></i>'],
+            ['fa-times', '<i aria-hidden="true" class="fa fa-times"></i>'],
+            ['fa-times-circle', '<i aria-hidden="true" class="fa fa-times-circle"></i>'],
+            ['fa-times-circle-o', '<i aria-hidden="true" class="fa fa-times-circle-o"></i>'],
+            ['fa-times-rectangle', '<i aria-hidden="true" class="fa fa-times-rectangle"></i>'],
+            ['fa-times-rectangle-o', '<i aria-hidden="true" class="fa fa-times-rectangle-o"></i>'],
+            ['fa-tint', '<i aria-hidden="true" class="fa fa-tint"></i>'],
+            ['fa-toggle-down', '<i aria-hidden="true" class="fa fa-toggle-down"></i>'],
+            ['fa-toggle-left', '<i aria-hidden="true" class="fa fa-toggle-left"></i>'],
+            ['fa-toggle-off', '<i aria-hidden="true" class="fa fa-toggle-off"></i>'],
+            ['fa-toggle-on', '<i aria-hidden="true" class="fa fa-toggle-on"></i>'],
+            ['fa-toggle-right', '<i aria-hidden="true" class="fa fa-toggle-right"></i>'],
+            ['fa-toggle-up', '<i aria-hidden="true" class="fa fa-toggle-up"></i>'],
+            ['fa-trademark', '<i aria-hidden="true" class="fa fa-trademark"></i>'],
+            ['fa-trash', '<i aria-hidden="true" class="fa fa-trash"></i>'],
+            ['fa-trash-o', '<i aria-hidden="true" class="fa fa-trash-o"></i>'],
+            ['fa-tree', '<i aria-hidden="true" class="fa fa-tree"></i>'],
+            ['fa-trophy', '<i aria-hidden="true" class="fa fa-trophy"></i>'],
+            ['fa-truck', '<i aria-hidden="true" class="fa fa-truck"></i>'],
+            ['fa-tty', '<i aria-hidden="true" class="fa fa-tty"></i>'],
+            ['fa-tv', '<i aria-hidden="true" class="fa fa-tv"></i>'],
+            ['fa-umbrella', '<i aria-hidden="true" class="fa fa-umbrella"></i>'],
+            ['fa-universal-access', '<i aria-hidden="true" class="fa fa-universal-access"></i>'],
+            ['fa-university', '<i aria-hidden="true" class="fa fa-university"></i>'],
+            ['fa-unlock', '<i aria-hidden="true" class="fa fa-unlock"></i>'],
+            ['fa-unlock-alt', '<i aria-hidden="true" class="fa fa-unlock-alt"></i>'],
+            ['fa-unsorted', '<i aria-hidden="true" class="fa fa-unsorted"></i>'],
+            ['fa-upload', '<i aria-hidden="true" class="fa fa-upload"></i>'],
+            ['fa-user', '<i aria-hidden="true" class="fa fa-user"></i>'],
+            ['fa-user-circle', '<i aria-hidden="true" class="fa fa-user-circle"></i>'],
+            ['fa-user-circle-o', '<i aria-hidden="true" class="fa fa-user-circle-o"></i>'],
+            ['fa-user-o', '<i aria-hidden="true" class="fa fa-user-o"></i>'],
+            ['fa-user-plus', '<i aria-hidden="true" class="fa fa-user-plus"></i>'],
+            ['fa-user-secret', '<i aria-hidden="true" class="fa fa-user-secret"></i>'],
+            ['fa-user-times', '<i aria-hidden="true" class="fa fa-user-times"></i>'],
+            ['fa-users', '<i aria-hidden="true" class="fa fa-users"></i>'],
+            ['fa-vcard', '<i aria-hidden="true" class="fa fa-vcard"></i>'],
+            ['fa-vcard-o', '<i aria-hidden="true" class="fa fa-vcard-o"></i>'],
+            ['fa-video-camera', '<i aria-hidden="true" class="fa fa-video-camera"></i>'],
+            ['fa-volume-control-phone', '<i aria-hidden="true" class="fa fa-volume-control-phone"></i>'],
+            ['fa-volume-down', '<i aria-hidden="true" class="fa fa-volume-down"></i>'],
+            ['fa-volume-off', '<i aria-hidden="true" class="fa fa-volume-off"></i>'],
+            ['fa-volume-up', '<i aria-hidden="true" class="fa fa-volume-up"></i>'],
+            ['fa-warning', '<i aria-hidden="true" class="fa fa-warning"></i>'],
+            ['fa-wheelchair', '<i aria-hidden="true" class="fa fa-wheelchair"></i>'],
+            ['fa-wheelchair-alt', '<i aria-hidden="true" class="fa fa-wheelchair-alt"></i>'],
+            ['fa-wifi', '<i aria-hidden="true" class="fa fa-wifi"></i>'],
+            ['fa-window-close', '<i aria-hidden="true" class="fa fa-window-close"></i>'],
+            ['fa-window-close-o', '<i aria-hidden="true" class="fa fa-window-close-o"></i>'],
+            ['fa-window-maximize', '<i aria-hidden="true" class="fa fa-window-maximize"></i>'],
+            ['fa-window-minimize', '<i aria-hidden="true" class="fa fa-window-minimize"></i>'],
+            ['fa-window-restore', '<i aria-hidden="true" class="fa fa-window-restore"></i>'],
+            ['fa-wrench', '<i aria-hidden="true" class="fa fa-wrench"></i>']]
+        for item in ICON_LIST:
+            item[1] = mark_safe(item[1])
+        class MenuModelForm(forms.ModelForm):
+            class Meta:
+                model = models.Menu
+                fields = '__all__'
+                widgets = {
+                    'title': forms.TextInput(attrs={'placeholder': '请输入角色名称', 'class': 'form-control'}),
+                    'icon': forms.RadioSelect(
+                        choices=ICON_LIST
+                    )
+                }
+                error_messages = {
+                    'title': {
+                        'required': '菜单名称不能为空',
+                    },
+                    'icon': {
+                        'required': '请选择图标',
+                    }
+                }
+
+35权限分配之二级菜单展示
+    在menu_list.html模板中再添加一个面板
+        问题：当没有mid时会显示全部权限
+            解决：在模板中判断有没有，再决定显示不？
+        问题：权限name和URL在一行显示的不方便之处，当url太长时，页面会乱
+            解决：循环的时候再增加一个tr标签，标签中放只放url，做两行显示
+                放url的哪一行占两列，前一个标签做两行
+                再去掉线
+
+    二级菜单的跳转
+        模板中
+            链接上加入？mid=...&sid=...
+            加ative
+
+36权限分配之二级菜单增删改
+    增加url
+    添加的时候，默认添加的在选中的一级菜单之下，所以需要在路由中传入id值
+        路由
+
+        form
+
+        视图
+            根据id获取菜单对象----在form对象中使用initial
+                form = SecondMenuModelForm(initial={'menu':menu_object})ModelForm显示默认值
+
+        模板中
+            还需要带上原来的条件
+
+    编辑
+        需要传递二级菜单ID
+        基本和上面一样
+        只需更改form、id、model还有反向生成URL
+
+    优化代码
+        拆分__init__方法
+
+
+37权限分配之权限的展示
+    添加面板
+    做数据的展示
+        数据是否显示的逻辑
+        新建按钮的显示逻辑（用的是exists）
+38权限分配之权限的增删改
+    根据前面的选择，决定权限的所属，不能更改
+    路由
+
+    视图
+        添加
+            form.save（）保存之前，获取到前面选择的二级菜单的ID，保存给pid
+            根据id获取到对象obj
+            form.instance.pid = obj
+            form.save
+
+
+    模板
+
+    form
+
+39权限分配之权限管理知识点总结
+    视频讲解
+        - 一级
+        - 二级
+        - 三级
+    知识点
+        - 小图标的拼接
+        - URL中原条件的保留
+        - 数据类型不一致的解决，模板中整形转化长字符串 1|safe
+        - ModelForm中定制radio
+        - ModelForm显示默认值
+        - ModelForm save之前对其instance进行修改
+        - 封装BootStrap基类，继承它帮助我们进行样式的渲染
+20181209 23:27
+
+40基于formset实现批量增加
+    - formset
+        - 什么事formset？
+            form组件或者ModelForm用于自动做一个表单验证
+            formset用于做多个表单的验证
+        - 应用场景？
+            批量操作
+        - 如何实现formset？
+            编写一个Form类
+            formset_class = formset_factory(MultiPermissionForm, extra=2)  意思为批量生成2个form
+
+            一个小问题
+                当表单什么也不输入的时候，会通过验证，然后返回的是两个空字典对象
+                当表单只要有一个输入，就会开始验证，并提示错误信息
+            写入数据库
+                for row in formset.clean_data:
+                    第一种
+                    models.Permission.objects.creat(**row)
+                    第二种
+                    obj = models.Permission(**row)
+                    obj.save()
+                    两种都是可以的，但是不推荐使用第一种
+                        因为数据库中的唯一索引，第一种不报错也会添加成功，第二种会直接报错
+
+                    给第二种加上错误捕捉
+                        try:
+                            obj = models.Permission(**row)
+                            obj.validate_unique()  # 检查当前对象在数据库是否存在唯一索引的异常
+                            obj.save()
+                        except Exception as e：
+                            pass
+
+                    错误信息的提示
+                        需求：对应的错误放在对应的数据下面
+                            需要解决的问题
+                                formset中的数据[form(字段，错误)，form(字段，错误)，form(字段，错误)]
+                                formset.clean_data中的数据[{},{},{}]
+                                并且两者没有直接的关系
+                            解决：基于两者的索引值是对应的
+                                必须先写上这个,为防止报错，因为一旦有错误信息，就没有form_data的信息了
+                                post_row_list = formset.clean_data # 检查formset如果没有错误信息，将所有的数据获取到
+                                for i range(0, formset.total_form_count())
+                                    row = post_row_list(i)  检查到没有错误新的数据
+                                    formset.errors[i].update(e)  抛异常，报错了之后，把错误信息加到对应的数据边上
+
+                            问题2：如果是空的，就不让他添加了
+                                if not row:
+                                    continue
+41基于formset实现批量编辑
+    编辑的时候和添加的时候不一样，必须要有ID字段，以区分编辑的是那一条数据
+        视图
+            使用initial
+            保存的逻辑
+                取出id，用的pop
+                跟新models.Permission.objects.filter(id=...).update(..row)
+            需要捕捉错误：不能直接使用update跟新
+                1、取出对象----对象的字段挨个给赋值用户提交的数据----检测错误---保存
+                    如果有错误 就跟新到error中
+                2、更好的方法：基于反射
+            需要设置标志位
+                最初为True
+                当抛出异常设置为False
+        模板
+            循环的时候，如果是循环的额第一个，直接显示标签，是隐藏的
+            forloop.first
+            这样
+        form
+            添加隐藏ID的标签，不在页面展示
+                id = forms.IntegeField（wigget=forms.HiddenInput（））
+
+42自动发现项目中的URL
+    - 问题：给你一个项目，请帮我获取当前项目中都有哪些URL一级name  namespace（反向生成URL）
+
+    - 思路：
+
+    - 编码
+        路由
+            url(r'^multi/permissions/$', menu.multi_permissions, name='multi_permissions'),
+        视图
+            去除特定的URL
+
+            获取项目中所有的url（有序字典）视图
+                根据字符串导入settings中的配置
+
+            递归的去取URL
+
+            批量操作权限视图
+                获取所有url，
+                <URLResolver <URLPattern list> (admin:admin) 'admin/'>
+                <URLResolver <module 'web.urls' from 'D:\\20181112\\CRM\\learn_rbac\\web\\urls.py'> (None:None) '^'>
+                <URLResolver <module 'rbac.urls' from 'D:\\20181112\\CRM\\learn_rbac\\rbac\\urls.py'> (rbac:rbac) '^rbac/'>
+                <URLPattern '^/xx/xx'>
+
+    - 自动发现项目中的url
+
+43批量操作权限实现思路
+    1、获取项目中所有的权限
+    2、去数据库中获取已经录入的所有权限
+
+    前端展示：三个面板
+        待新建权限列表
+            路由系统自动发现 且 数据库中不存在的路由
+        待删除权限列表
+            路由系统中不存在 但 数据库中存在
+        待跟新权限列表
+            路由系统 和 数据库中 都存在
+
+    做两个集合的交并集
+
+44批量操作权限的页面展示
+    什么时候用Form，什么时候用ModelForm？
+    要点
+        删除权限是用不上formset
+        编辑的时候form多一个隐藏的ID
+
+        优先用数据库中的数据，因为数据库中有名称，...数据更多
+            数据库中有，自动发现的也有，但是部分不一样，一定要显示出来
+                解决：做一次循环，看是不是一样，然后显示
+
+        跟新权限的面板中，
+            模板中，需要对字段判断，如果是字段是ID，直接显示隐藏的标签
+
+45权限的批量增删改
+    定义action，来区别是提交的添加 还是 编辑
+    添加
+        显示错误的逻辑
+            先定义空的formset，如果是post，就把有用户输入的formset传到前端，
+                               如果是get，生成新的formset
+            for i in range(0, formset.total_form_count()):
+            new_object.validate_unique()
+            formset.errors[i].update(e)
+
+        bulk_create 批量增加
+
+    编辑
+        setattr(row_object, k, v)基于反射
+
+    删除
+
+46权限的批量操作的知识点总结
+    - formset （ModelFormSet）
+    - 自动发现URL
+    - 唯一约束错误信息
+47权限分配实现思路
+    给后台管理员一个页面，给用户分配角色，给角色分配权限
+    3个面板
+    3个步骤
+        1、展示用户，角色，权限信息
+        2、选择用户或者角色时，页面上的默认选项
+        3、角色和权限的分配（保存）
+
+48-49权限扥配页面展示
+    权限数据的三级结构
+        获取所有菜单
+        获取所有二级菜单
+        获取所有三级菜单（不能做菜单的权限）
+    结合在一起
+        一个例子：列表内字典数据的修改
+        二个例子：字典的查找
+
+    对于不能做菜单的权限，也没有选择pid的权限该怎么处理
+        if not pid：
+            continue
+
+
+
+50权限分配之选中用户拥有的权限和角色
+    对于菜单下没有二级菜单的的显示
+    点击用户，显示默认角色
+        点击用户，id（？id=12）传到后端----根据ID取出所有角色----做一个字段格式{id:None}-----后端判断是否存在，据此添加checked属性
+
+        显示所有权限
+            排除空权限，去重
+            做法和上面一样
+
+51权限分配之选中角色所拥有的权限
+    首先，角色是可以点击的
+    点击之后，分配权限
+        当选的有用户和角色时，两个ID都带过去
+
+    如果选择了用户，优先显示用户的所有权限
+    如果选择了角色，优先显示角色的所有权限
+    如果都没选，就是空字典
+
+
+52用户分配角色以及角色分配权限
+    面板做成表单，以提交
+        此时的action提交不建议使用前面用的type
+        用一个隐藏的input标签
+
+    全选功能
+        写JS
+
+    知识点的总结
+        - 最值得关注的：数据构造的例子
+        - Manytomany的数据库的添加
+        -
+    开发完毕
+53客户管理系统中应用权限组件
+
+54-56rbac组件应用以及补充
+    编写使用文档（以做一个主机管理系统为例子）
+        表结构
+            扩展用户表使用onetoone
+            ...
+            这样做的缺点
+                用户表数据分散
+            优点
+                利用上rbac中的用户管理的功能
+            另外一种方式
+                继承：abstract
+
+                注意，rbac中两处使用了用户表的地方
+                    - 用户管理
+                    - 权限分配时的用户列表
+                    这两处暂时用不了了，需要做处理
+                严重提醒：
+                    数据库迁移的报错：外键的关联去掉引号
+
+                对于rbac中的代码修改
+                    1、在URL中将用户表的增删改查和修改密码功能删除
+                    2、用配置文件来找到userinfo表
+                        RBAC_USER_MODLE_CLASS = "app01.models.UserInfo"
+                        配置文件+import_string
+
+                将模板和样式也继承到rbac中
+                    如果要使用rbac中的模板。则需要将模板中的导航条，动态菜单先去掉，在项目上线之前在加上
+
+                在业务中写用户表的增删改查
+                写主机表的增删改查
+
+                感受：编写业务功能的时，出现了大量的拷贝
+
+                4、权限的应用
+                    4.1、将菜单和导航条添加到layout.html中
+                    4.2、应用权限中间件（先做用户登录页面）
+                    4.3、白名单的处理
+                    4.4、权限初始化settings中的配置key
+                    4.5、批量操作全显示，自动发现路有中需要排除的url
+                    4.6、用户登录逻辑，注销（request.session.delete（））
+                    配置权限路由
+                    权限录入
+                        - 写完登录逻辑，对于/index/、/login/、/logout/三个是否分配权限
+                            方案一: 将其 录入数据库 以后给每个用户都分配权限
+                            方案二: 默认用户登录后，都能访问
+                                        # 白名单
+                                        VALID_URL_LIST = [
+                                            '/login/',
+                                            '/admin/.*'
+                                        ]
+
+                                        # 需要登录但无需权限的URL，
+                                        # 在中间件中写逻辑（有一个bug，解决：
+                                                    直接给current_selected_permission = 0，并把request.breadcrumb = url_record提上去）
+                                        NO_PERMISSION_LIST = [
+                                            '/index/',
+                                            '/logout/',
+                                        ]
+
+                                        # 自动化发现路由中URL时，排除的URL
+                                        AUTO_DISCOVER_EXCLUDE = [
+                                            '/admin/.*',
+                                            '/login/',
+                                            '/logout/',
+                                            '/index/',
+                                        ]
+
+57rbac组件使用文档
+    缕流程
+
+
+    ...
+    按钮的粒度控制，使用管道符{% if request|has_permission:'host_add' %}
+
+58rbac结束
+    公共组件
+
+59stark组件介绍
+    stark组件是一个帮助开发者快速实现数据库表的增删改查+。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
